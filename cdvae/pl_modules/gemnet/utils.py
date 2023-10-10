@@ -126,6 +126,7 @@ def repeat_blocks(
     # Remove 0 sizes
     sizes_nonzero = sizes > 0
     if not torch.all(sizes_nonzero):
+        # print(block_inc)
         assert block_inc == 0  # Implementing this is not worth the effort
         sizes = torch.masked_select(sizes, sizes_nonzero)
         if isinstance(repeats, torch.Tensor):

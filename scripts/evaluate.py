@@ -26,6 +26,16 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
     input_data_list = []
 
     for idx, batch in enumerate(loader):
+        
+        batch_reserve = batch
+        xrd_int = batch_reserve[1]
+        xrd_loc = batch_reserve[2]
+        atom_spec = batch_reserve[3]
+        batch = batch[0]
+
+        print(idx)
+        print(batch)
+
         if torch.cuda.is_available():
             batch.cuda()
         print(f'batch {idx} in {len(loader)}')
@@ -35,11 +45,20 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
         batch_lengths, batch_angles = [], []
 
         # only sample one z, multiple evals for stoichaticity in langevin dynamics
-        _, _, z = model.encode(batch)
+        _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
+        #_, _, z = model.prior_encode(batch)
 
         for eval_idx in range(num_evals):
             gt_num_atoms = batch.num_atoms if force_num_atoms else None
             gt_atom_types = batch.atom_types if force_atom_types else None
+
+            #print out the arguments into the langevin_dynamics function
+            print("z: ", z)
+            print("ld_kwargs: ", ld_kwargs)
+            print("gt_num_atoms: ", gt_num_atoms)
+            print("gt_atom_types: ", gt_atom_types)
+            
+
             outputs = model.langevin_dynamics(
                 z, ld_kwargs, gt_num_atoms, gt_atom_types)
 
@@ -54,6 +73,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                     outputs['all_frac_coords'][::down_sample_traj_step].detach().cpu())
                 batch_all_atom_types.append(
                     outputs['all_atom_types'][::down_sample_traj_step].detach().cpu())
+                
         # collect sampled crystals for this z.
         frac_coords.append(torch.stack(batch_frac_coords, dim=0))
         num_atoms.append(torch.stack(batch_num_atoms, dim=0))
@@ -65,6 +85,9 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                 torch.stack(batch_all_frac_coords, dim=0))
             all_atom_types_stack.append(
                 torch.stack(batch_all_atom_types, dim=0))
+
+        print(batch)
+        
         # Save the ground truth structure
         input_data_list = input_data_list + batch.to_data_list()
 
@@ -178,6 +201,7 @@ def main(args):
     model, test_loader, cfg = load_model(
         model_path, load_data=('recon' in args.tasks) or
         ('opt' in args.tasks and args.start_from == 'data'))
+    print(test_loader)
     ld_kwargs = SimpleNamespace(n_step_each=args.n_step_each,
                                 step_lr=args.step_lr,
                                 min_sigma=args.min_sigma,

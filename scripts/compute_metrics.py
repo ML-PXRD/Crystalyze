@@ -37,7 +37,6 @@ COV_Cutoffs = {
 
 
 class Crystal(object):
-
     def __init__(self, crys_array_dict):
         self.frac_coords = crys_array_dict['frac_coords']
         self.atom_types = crys_array_dict['atom_types']
@@ -49,7 +48,6 @@ class Crystal(object):
         self.get_composition()
         self.get_validity()
         self.get_fingerprints()
-
     def get_structure(self):
         if min(self.lengths.tolist()) < 0:
             self.constructed = False
@@ -67,7 +65,6 @@ class Crystal(object):
             if self.structure.volume < 0.1:
                 self.constructed = False
                 self.invalid_reason = 'unrealistically_small_lattice'
-
     def get_composition(self):
         elem_counter = Counter(self.atom_types)
         composition = [(elem, elem_counter[elem])
@@ -77,7 +74,6 @@ class Crystal(object):
         counts = counts / np.gcd.reduce(counts)
         self.elems = elems
         self.comps = tuple(counts.astype('int').tolist())
-
     def get_validity(self):
         self.comp_valid = smact_validity(self.elems, self.comps)
         if self.constructed:
@@ -85,7 +81,6 @@ class Crystal(object):
         else:
             self.struct_valid = False
         self.valid = self.comp_valid and self.struct_valid
-
     def get_fingerprints(self):
         elem_counter = Counter(self.atom_types)
         comp = Composition(elem_counter)
@@ -297,10 +292,19 @@ def main(args):
 
     if 'recon' in args.tasks:
         recon_file_path = get_file_paths(args.root_path, 'recon', args.label)
+
+        print(recon_file_path)
+
         crys_array_list, true_crystal_array_list = get_crystal_array_list(
             recon_file_path)
+        
+        print(crys_array_list)
+        print(true_crystal_array_list)
+
         pred_crys = p_map(lambda x: Crystal(x), crys_array_list)
+        print(pred_crys)
         gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list)
+        print(gt_crys)
 
         rec_evaluator = RecEval(pred_crys, gt_crys)
         recon_metrics = rec_evaluator.get_metrics()

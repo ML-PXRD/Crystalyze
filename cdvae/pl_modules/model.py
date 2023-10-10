@@ -17,6 +17,12 @@ from cdvae.common.data_utils import (
 from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
 from cdvae.pl_modules.embeddings import KHOT_EMBEDDINGS
 
+#added by Tsach
+from pymatgen.core.structure import Structure
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.lattice import Lattice
+from pymatgen.analysis.diffraction.xrd import XRDCalculator
+# torch.set_printoptions(threshold=50000) # use this if you want to print the entire tensor
 
 def build_mlp(in_dim, hidden_dim, fc_num_layers, out_dim):
     mods = [nn.Linear(in_dim, hidden_dim), nn.ReLU()]
@@ -135,6 +141,8 @@ class CrystGNN_Supervise(BaseModule):
 
 class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
+        self.use_cond_kld = kwargs.pop("use_cond_kld", True)  # provide a default in case it's not in the config
+
         super().__init__(*args, **kwargs)
 
         self.encoder = hydra.utils.instantiate(
@@ -145,6 +153,11 @@ class CDVAE(BaseModule):
                                self.hparams.latent_dim)
         self.fc_var = nn.Linear(self.hparams.latent_dim,
                                 self.hparams.latent_dim)
+        
+        self.prior_mu = nn.Linear(self.hparams.latent_dim,
+                                 self.hparams.latent_dim)
+        self.prior_var = nn.Linear(self.hparams.latent_dim,
+                                    self.hparams.latent_dim)
 
         self.fc_num_atoms = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                       self.hparams.fc_num_layers, self.hparams.max_atoms+1)
@@ -190,16 +203,39 @@ class CDVAE(BaseModule):
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return eps * std + mu
+    
+    def prior_encode(self, batch, xrd_int, xrd_loc, atom_spec):   
+        #using just the xrd_loc as the encoding for now
+        encoding = xrd_loc
+        mu = self.prior_mu(encoding)
+        log_var = self.prior_var(encoding)
 
-    def encode(self, batch):
+        z = self.reparameterize(mu, log_var)
+        return mu, log_var, z
+    
+    def encode(self, batch, xrd_int, xrd_loc, atom_spec):
         """
         encode crystal structures to latents.
         """
         hidden = self.encoder(batch)
-        mu = self.fc_mu(hidden)
-        log_var = self.fc_var(hidden)
-        z = self.reparameterize(mu, log_var)
-        return mu, log_var, z
+        # # for now, just use the xrd_loc as the non_cond_z
+        non_cond_z = xrd_loc
+
+        #put the non_cond_z on cuda 0 if it's not already there
+        non_cond_z = non_cond_z.cuda(0)
+
+        #put the hidden on cuda 0 if it's not already there
+        hidden = hidden.cuda(0)
+
+        combined_hidden = hidden * non_cond_z
+        cond_mu = self.fc_mu(combined_hidden)
+        cond_log_var = self.fc_var(combined_hidden)
+        cond_z2 = self.reparameterize(cond_mu, cond_log_var)
+
+        if self.use_cond_kld:
+            return cond_mu, cond_log_var, cond_z2
+        else:
+            return cond_mu, cond_log_var, non_cond_z
 
     def decode_stats(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
                      teacher_forcing=False):
@@ -265,10 +301,31 @@ class CDVAE(BaseModule):
             step_size = ld_kwargs.step_lr * (sigma / self.sigmas[-1]) ** 2
 
             for step in range(ld_kwargs.n_step_each):
-                noise_cart = torch.randn_like(
-                    cur_frac_coords) * torch.sqrt(step_size * 2)
-                pred_cart_coord_diff, pred_atom_types = self.decoder(
-                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+
+                trials = 100
+                for trial in range(trials):
+                    noise_cart = torch.randn_like(
+                        cur_frac_coords) * torch.sqrt(step_size * 2)
+                    
+                    # #print the arguments to the decoder
+                    # print('z is ', z)
+                    print('cur_frac_coords is ', cur_frac_coords)
+                    print('cur_atom_types is ', cur_atom_types)
+                    print('num_atoms is ', num_atoms)
+                    # print('lengths is ', lengths)
+                    # print('angles is ', angles)
+                    try: 
+                        pred_cart_coord_diff, pred_atom_types = self.decoder(
+                            z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+                        break
+                    except:
+                        cur_cart_coords = frac_to_cart_coords(cur_frac_coords, lengths, angles, num_atoms)
+                        pred_cart_coord_diff = pred_cart_coord_diff / sigma
+                        cur_cart_coords = cur_cart_coords + step_size * pred_cart_coord_diff + noise_cart
+                        cur_frac_coords = cart_to_frac_coords(
+                            cur_cart_coords, lengths, angles, num_atoms)
+                        continue
+
                 cur_cart_coords = frac_to_cart_coords(
                     cur_frac_coords, lengths, angles, num_atoms)
                 pred_cart_coord_diff = pred_cart_coord_diff / sigma
@@ -308,13 +365,21 @@ class CDVAE(BaseModule):
         return samples
 
     def forward(self, batch, teacher_forcing, training):
+        batch_reserve = batch
+        xrd_int = batch_reserve[1]
+        xrd_loc = batch_reserve[2]
+        atom_spec = batch_reserve[3]
+        batch = batch[0]
+
         # hacky way to resolve the NaN issue. Will need more careful debugging later.
-        mu, log_var, z = self.encode(batch)
+        mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
+
+        prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
         (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
          pred_composition_per_atom) = self.decode_stats(
             z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
-
+        
         # sample noise levels.
         noise_level = torch.randint(0, self.sigmas.size(0),
                                     (batch.num_atoms.size(0),),
@@ -347,27 +412,45 @@ class CDVAE(BaseModule):
         cart_coords = cart_coords + cart_noises_per_atom
         noisy_frac_coords = cart_to_frac_coords(
             cart_coords, pred_lengths, pred_angles, batch.num_atoms)
+        
+        # print('z is ', z)
+        # print('noisy_frac_coords is ', noisy_frac_coords)
+        # print('rand_atom_types is ', rand_atom_types)
+        # print('batch.num_atoms is ', batch.num_atoms)
+        # print('pred_lengths is ', pred_lengths)
+        # print('pred_angles is ', pred_angles)
 
         pred_cart_coord_diff, pred_atom_types = self.decoder(
             z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
 
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
+        # print("the num_atom_loss is ", num_atom_loss)
         lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
+        # print("the lattice_loss is ", lattice_loss)
         composition_loss = self.composition_loss(
             pred_composition_per_atom, batch.atom_types, batch)
+        # print("the composition_loss is ", composition_loss)
         coord_loss = self.coord_loss(
             pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
+        # print("the coord_loss is ", coord_loss)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types,
                                    used_type_sigmas_per_atom, batch)
+        # print("the type_loss is ", type_loss)
 
-        kld_loss = self.kld_loss(mu, log_var)
+        #added by Tsach: 
+        if self.use_cond_kld:
+            kld_loss = self.kld_loss(mu, log_var)
+            kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
+        else:
+            kld_loss = self.kld_loss(mu, log_var)
+            kld_loss = 0
 
         if self.hparams.predict_property:
             property_loss = self.property_loss(z, batch)
         else:
             property_loss = 0.
-
+        
         return {
             'num_atom_loss': num_atom_loss,
             'lattice_loss': lattice_loss,
@@ -521,6 +604,28 @@ class CDVAE(BaseModule):
         kld_loss = torch.mean(
             -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1), dim=0)
         return kld_loss
+    
+    #define a kld loss between the posterior and prorior distributions
+    def kld_loss_prior(self, mu, log_var, prior_mu, prior_log_var):
+        #print all the values
+        A = 10
+        # For log_var
+        log_var = A * torch.tanh(log_var)
+ 
+        # For prior_log_var
+        prior_log_var = A * torch.tanh(prior_log_var)
+
+        diff_squared = (mu - prior_mu)**2
+        term1 = prior_log_var - log_var
+        term2 = (torch.exp(log_var) + diff_squared) / torch.exp(prior_log_var)
+        kld_loss = torch.mean(
+            0.5 * torch.sum(term1 + term2 - 1, dim=1),
+            dim=0
+        )
+
+        print("kld_loss: ", kld_loss)
+        return kld_loss
+    
 
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         teacher_forcing = (
@@ -555,6 +660,12 @@ class CDVAE(BaseModule):
         return loss
 
     def compute_stats(self, batch, outputs, prefix):
+        batch_reserve = batch
+        xrd_int = batch_reserve[1]
+        xrd_loc = batch_reserve[2]
+        atom_spec = batch_reserve[3]
+        batch = batch[0]
+
         num_atom_loss = outputs['num_atom_loss']
         lattice_loss = outputs['lattice_loss']
         coord_loss = outputs['coord_loss']

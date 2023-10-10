@@ -216,3 +216,10 @@ fabric.properties
 
 # .DS_Store
 .DS_Store
+
+
+#error folder
+error/
+
+#output folder
+output/

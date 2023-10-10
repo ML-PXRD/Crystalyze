@@ -80,6 +80,9 @@ def run(cfg: DictConfig) -> None:
         # Switch wandb mode to offline to prevent online logging
         cfg.logging.wandb.mode = "offline"
 
+    #added by Tsach - to prevent online logging
+    cfg.logging.wandb.mode = "offline"
+
     # Hydra run directory
     hydra_dir = Path(HydraConfig.get().run.dir)
 
@@ -89,6 +92,9 @@ def run(cfg: DictConfig) -> None:
         cfg.data.datamodule, _recursive_=False
     )
 
+    #print out the use cfg parameter to make sure you're doing things correctly
+    print("cfg.model.use_cond_kld is ", cfg.model.use_cond_kld)
+
     # Instantiate model
     hydra.utils.log.info(f"Instantiating <{cfg.model._target_}>")
     model: pl.LightningModule = hydra.utils.instantiate(
@@ -96,6 +102,7 @@ def run(cfg: DictConfig) -> None:
         optim=cfg.optim,
         data=cfg.data,
         logging=cfg.logging,
+        use_cond_kld=cfg.model.use_cond_kld,
         _recursive_=False,
     )
 
@@ -108,7 +115,7 @@ def run(cfg: DictConfig) -> None:
     # Instantiate the callbacks
     callbacks: List[Callback] = build_callbacks(cfg=cfg)
 
-    # Logger instantiation/configuration
+    # # Logger instantiation/configuration
     wandb_logger = None
     if "wandb" in cfg.logging:
         hydra.utils.log.info("Instantiating <WandbLogger>")
@@ -117,7 +124,10 @@ def run(cfg: DictConfig) -> None:
             **wandb_config,
             tags=cfg.core.tags,
         )
+        
+        # The following line is commented out to avoid watching the model
         hydra.utils.log.info("W&B is now watching <{cfg.logging.wandb_watch.log}>!")
+        
         wandb_logger.watch(
             model,
             log=cfg.logging.wandb_watch.log,
@@ -149,6 +159,7 @@ def run(cfg: DictConfig) -> None:
         **cfg.train.pl_trainer,
     )
     log_hyperparameters(trainer=trainer, model=model, cfg=cfg)
+
 
     hydra.utils.log.info("Starting training!")
     trainer.fit(model=model, datamodule=datamodule)

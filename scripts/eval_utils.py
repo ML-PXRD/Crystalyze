@@ -77,7 +77,10 @@ def load_model(model_path, load_data=False, testing=True):
             )
             if testing:
                 datamodule.setup('test')
+                print(datamodule)
+                print(datamodule.test_dataloader())
                 test_loader = datamodule.test_dataloader()[0]
+                print(test_loader)
             else:
                 datamodule.setup()
                 test_loader = datamodule.val_dataloader()[0]

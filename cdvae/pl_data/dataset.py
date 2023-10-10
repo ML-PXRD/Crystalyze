@@ -50,7 +50,12 @@ class CrystDataset(Dataset):
         prop = self.scaler.transform(data_dict[self.prop])
         (frac_coords, atom_types, lengths, angles, edge_indices,
          to_jimages, num_atoms) = data_dict['graph_arrays']
-
+        xrd_intensities = data_dict['xrd_intensities']
+        xrd_locations = data_dict['xrd_locations']
+        atomic_species = data_dict['atomic_species']
+        # print(xrd_intensities)
+        # print(xrd_locations)
+        # print(atomic_species)
         # atom_coords are fractional coordinates
         # edge_index is incremented during batching
         # https://pytorch-geometric.readthedocs.io/en/latest/notes/batching.html
@@ -67,7 +72,7 @@ class CrystDataset(Dataset):
             num_nodes=num_atoms,  # special attribute used for batching in pytorch geometric
             y=prop.view(1, -1),
         )
-        return data
+        return data, xrd_intensities, xrd_locations, atomic_species
 
     def __repr__(self) -> str:
         return f"CrystDataset({self.name=}, {self.path=})"

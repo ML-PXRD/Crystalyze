@@ -18,6 +18,7 @@ from torch_scatter import scatter
 
 from p_tqdm import p_umap
 
+import ast
 
 # Tensor of unit cells. Assumes 27 cells in -1, 0, 1 offsets in the x and y dimensions
 # Note that differing from OCP, we have 27 offsets here because we are in 3D
@@ -646,6 +647,21 @@ def get_scaler_from_data_list(data_list, key):
     scaler.fit(targets)
     return scaler
 
+### Old code made by Tsach ### 
+# def convert_to_floats(s: str) -> list:
+#     # Removing brackets and stripping spaces
+#     cleaned_str = s.strip().replace("[", "").replace("]", "").strip()
+
+#     # Splitting by space
+#     parts = cleaned_str.split()
+
+#     # Parsing each part
+#     numbers = []
+#     for part in parts:
+#         # Splitting by comma and converting each substring to float
+#         numbers.extend([float(num_str) for num_str in part.split(",") if num_str])
+
+#     return numbers
 
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                prop_list):
@@ -653,6 +669,24 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
     def process_one(row, niggli, primitive, graph_method, prop_list):
         crystal_str = row['cif']
+
+        extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers']
+        extra_feature_data = []
+
+        for feature in extra_feature_names:
+            #use ast to convert string to list
+            feature_val_rough = ast.literal_eval(row[feature])
+           
+            #ensure that the vector is 256 long with 0 padding
+            if len(feature_val_rough) < 256:
+                feature_val_refined = feature_val_rough + [0]*(256-len(feature_val_rough))
+            else:
+                feature_val_refined = feature_val_rough[:256]
+    
+            #create tensors for everything 
+            feature_tensor = torch.tensor(feature_val_refined)
+            extra_feature_data.append(feature_tensor)
+
         crystal = build_crystal(
             crystal_str, niggli=niggli, primitive=primitive)
         graph_arrays = build_crystal_graph(crystal, graph_method)
@@ -661,10 +695,14 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
             'mp_id': row['material_id'],
             'cif': crystal_str,
             'graph_arrays': graph_arrays,
+            'xrd_intensities': extra_feature_data[0],
+            'xrd_locations': extra_feature_data[1],
+            'atomic_species': extra_feature_data[2],
         }
+        # print(result_dict)
         result_dict.update(properties)
         return result_dict
-
+    # print(df)
     unordered_results = p_umap(
         process_one,
         [df.iloc[idx] for idx in range(len(df))],

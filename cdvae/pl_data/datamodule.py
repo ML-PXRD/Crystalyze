@@ -13,7 +13,7 @@ from torch_geometric.data import DataLoader
 
 from cdvae.common.utils import PROJECT_ROOT
 from cdvae.common.data_utils import get_scaler_from_data_list
-
+from torch_geometric.data import Batch
 
 def worker_init_fn(id: int):
     """
@@ -97,6 +97,18 @@ class CrystDataModule(pl.LightningDataModule):
                 test_dataset.lattice_scaler = self.lattice_scaler
                 test_dataset.scaler = self.scaler
 
+    def custom_collate(batch):
+        
+        data_list = [item[0] for item in batch]
+        pxrd_locations_list = [item[1] for item in batch]
+        pxrd_intensities_list = [item[2] for item in batch]
+        atomic_species_list = [item[3] for item in batch]
+
+        batched_data = Batch.from_data_list(data_list)
+
+        return batched_data, pxrd_locations_list, pxrd_intensities_list, atomic_species_list
+
+
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
             self.train_dataset,
@@ -114,6 +126,7 @@ class CrystDataModule(pl.LightningDataModule):
                 batch_size=self.batch_size.val,
                 num_workers=self.num_workers.val,
                 worker_init_fn=worker_init_fn,
+                collate_fn=self.custom_collate,
             )
             for dataset in self.val_datasets
         ]
