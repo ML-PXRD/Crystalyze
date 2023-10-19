@@ -471,19 +471,6 @@ class GemNetT(torch.nn.Module):
 
         # Indices for swapping c->a and a->c (for symmetric MP)
         block_sizes = neighbors // 2
-        #print block_sizes
-        print("block_sizes", block_sizes)
-
-        #old method - zeroing stuff out - didn't work
-        # #check to see if there are any zero block sizes
-        # if torch.any(block_sizes == 0):
-        #     #if there are zero block sizes, set the whole thing to 0
-        #     # I also set everything else to 0 to try and avoid incongruent information 
-        #     block_sizes = torch.zeros_like(block_sizes)
-        #     neighbors = torch.zeros_like(neighbors)
-        #     edge_index = torch.zeros_like(edge_index)
-        #     D_st = torch.zeros_like(D_st)
-        #     V_st = torch.zeros_like(V_st)
 
         id_swap = repeat_blocks(
             block_sizes,

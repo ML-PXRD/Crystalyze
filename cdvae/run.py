@@ -94,6 +94,8 @@ def run(cfg: DictConfig) -> None:
 
     #print out the use cfg parameter to make sure you're doing things correctly
     print("cfg.model.use_cond_kld is ", cfg.model.use_cond_kld)
+    #print out the useoriginal parameter to make sure you're doing things correctly
+    print("cfg.model.useoriginal is ", cfg.model.useoriginal)
 
     # Instantiate model
     hydra.utils.log.info(f"Instantiating <{cfg.model._target_}>")
@@ -103,6 +105,7 @@ def run(cfg: DictConfig) -> None:
         data=cfg.data,
         logging=cfg.logging,
         use_cond_kld=cfg.model.use_cond_kld,
+        useoriginal=cfg.model.useoriginal,
         _recursive_=False,
     )
 

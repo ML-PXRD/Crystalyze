@@ -292,19 +292,10 @@ def main(args):
 
     if 'recon' in args.tasks:
         recon_file_path = get_file_paths(args.root_path, 'recon', args.label)
-
-        print(recon_file_path)
-
         crys_array_list, true_crystal_array_list = get_crystal_array_list(
             recon_file_path)
-        
-        print(crys_array_list)
-        print(true_crystal_array_list)
-
         pred_crys = p_map(lambda x: Crystal(x), crys_array_list)
-        print(pred_crys)
         gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list)
-        print(gt_crys)
 
         rec_evaluator = RecEval(pred_crys, gt_crys)
         recon_metrics = rec_evaluator.get_metrics()

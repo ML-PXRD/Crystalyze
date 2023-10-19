@@ -4,9 +4,8 @@
 #SBATCH --array=1                # Array job ID
 #SBATCH --mem=45000              # Request 45GB memory
 #SBATCH --time=96:00:00          # Set maximum wall time
-#SBATCH --output="output/%j_output.txt"  # Set output file
-#SBATCH --error="error/%j_error.txt"     # Set error file
 #SBATCH --gres=gpu:volta:1     # Request 1 GPU (atm, code breaks over 2, see Understanding CDVAE doc)
+
 
 echo "Date              = $(date)"
 echo "Hostname          = $(hostname -s)"

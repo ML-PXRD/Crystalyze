@@ -19,6 +19,8 @@ from torch_scatter import scatter
 from p_tqdm import p_umap
 
 import ast
+#import the random function library
+import random
 
 # Tensor of unit cells. Assumes 27 cells in -1, 0, 1 offsets in the x and y dimensions
 # Note that differing from OCP, we have 27 offsets here because we are in 3D
@@ -663,6 +665,7 @@ def get_scaler_from_data_list(data_list, key):
 
 #     return numbers
 
+
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                prop_list):
     df = pd.read_csv(input_file)
@@ -676,7 +679,14 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         for feature in extra_feature_names:
             #use ast to convert string to list
             feature_val_rough = ast.literal_eval(row[feature])
-           
+
+            #if the feature is atomic_numbers, get only the unique values and randomize
+            if feature == 'atomic_numbers':
+                # get the unique values
+                feature_val_rough = list(set(feature_val_rough))
+                # randomize the order 
+                random.shuffle(feature_val_rough)
+
             #ensure that the vector is 256 long with 0 padding
             if len(feature_val_rough) < 256:
                 feature_val_refined = feature_val_rough + [0]*(256-len(feature_val_rough))

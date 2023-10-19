@@ -1,5 +1,6 @@
 _target_: cdvae.pl_modules.model.CDVAE
 use_cond_kld: false # default value, can be overridden
+useoriginal: true
 hidden_dim: 256
 latent_dim: 256
 fc_num_layers: 1
@@ -11,7 +12,7 @@ cost_lattice: 10.
 cost_composition: 1.
 cost_edge: 10.
 cost_property: 1.
-beta: 1 #modified by Tsach for the conditional model
+beta: 0.01 #modified by Tsach for the conditional model
 teacher_forcing_lattice: true
 teacher_forcing_max_epoch: ${data.teacher_forcing_max_epoch}
 max_neighbors: 20  # maximum number of neighbors for OTF graph bulding in decoder

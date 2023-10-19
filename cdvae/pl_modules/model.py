@@ -22,7 +22,7 @@ from pymatgen.core.structure import Structure
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
-# torch.set_printoptions(threshold=50000) # use this if you want to print the entire tensor
+torch.set_printoptions(threshold=50000) # use this if you want to print the entire tensor
 
 def build_mlp(in_dim, hidden_dim, fc_num_layers, out_dim):
     mods = [nn.Linear(in_dim, hidden_dim), nn.ReLU()]
@@ -141,7 +141,8 @@ class CrystGNN_Supervise(BaseModule):
 
 class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
-        self.use_cond_kld = kwargs.pop("use_cond_kld", True)  # provide a default in case it's not in the config
+        self.use_cond_kld = kwargs.pop("use_cond_kld", False)  # provide a default in case it's not in the config
+        self.useoriginal = kwargs.pop("useoriginal", True)  # provide a default in case it's not in the config
 
         super().__init__(*args, **kwargs)
 
@@ -165,6 +166,10 @@ class CDVAE(BaseModule):
                                     self.hparams.fc_num_layers, 6)
         self.fc_composition = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
+        
+        # self.atomic_and_diffraction_encoder = build_mlp(768, 256, 2, 256)
+        self.atomic_and_diffraction_encoder = build_mlp(512, 256, 2, 256)
+
         # for property prediction.
         if self.hparams.predict_property:
             self.fc_property = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
@@ -218,8 +223,21 @@ class CDVAE(BaseModule):
         encode crystal structures to latents.
         """
         hidden = self.encoder(batch)
-        # # for now, just use the xrd_loc as the non_cond_z
-        non_cond_z = xrd_loc
+        if self.useoriginal:            
+            mu = self.fc_mu(hidden)
+            log_var = self.fc_var(hidden)
+            z = self.reparameterize(mu, log_var)
+            return mu, log_var, z
+
+        #concatenate the xrd_loc, xrd_int, and atom_spec, each of which are 256 x 256 tensors
+        #the concatenated tensor is 256 x 768
+        # concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
+        concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+
+        concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
+
+        #put the xrd_loc and atom_spec through a series of mlps to go from a 256 x 768  tensor to a 256 x 256 tensor
+        non_cond_z = self.atomic_and_diffraction_encoder(concat_xrd_loc_atom_spec)
 
         #put the non_cond_z on cuda 0 if it's not already there
         non_cond_z = non_cond_z.cuda(0)
@@ -259,7 +277,7 @@ class CDVAE(BaseModule):
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
     @torch.no_grad()
-    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None):
+    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None, tsach_atom_types=None):
         """
         decode crystral structure from latent embeddings.
         ld_kwargs: args for doing annealed langevin dynamics sampling:
@@ -271,6 +289,74 @@ class CDVAE(BaseModule):
         gt_num_atoms: if not <None>, use the ground truth number of atoms.
         gt_atom_types: if not <None>, use the ground truth atom types.
         """
+        
+        if self.useoriginal:
+            if ld_kwargs.save_traj:
+                all_frac_coords = []
+                all_pred_cart_coord_diff = []
+                all_noise_cart = []
+                all_atom_types = []
+
+            # obtain key stats.
+            num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats(
+                z, gt_num_atoms)
+            if gt_num_atoms is not None:
+                num_atoms = gt_num_atoms
+
+            # obtain atom types.
+            composition_per_atom = F.softmax(composition_per_atom, dim=-1)
+            if gt_atom_types is None:
+                cur_atom_types = self.sample_composition(
+                    composition_per_atom, num_atoms)
+            else:
+                cur_atom_types = gt_atom_types
+
+            # init coords.
+            cur_frac_coords = torch.rand((num_atoms.sum(), 3), device=z.device)
+
+            # annealed langevin dynamics.
+            for sigma in tqdm(self.sigmas, total=self.sigmas.size(0), disable=ld_kwargs.disable_bar):
+                if sigma < ld_kwargs.min_sigma:
+                    break
+                step_size = ld_kwargs.step_lr * (sigma / self.sigmas[-1]) ** 2
+
+                for step in range(ld_kwargs.n_step_each):
+                    noise_cart = torch.randn_like(
+                        cur_frac_coords) * torch.sqrt(step_size * 2)
+                    pred_cart_coord_diff, pred_atom_types = self.decoder(
+                        z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+                    cur_cart_coords = frac_to_cart_coords(
+                        cur_frac_coords, lengths, angles, num_atoms)
+                    pred_cart_coord_diff = pred_cart_coord_diff / sigma
+                    cur_cart_coords = cur_cart_coords + step_size * pred_cart_coord_diff + noise_cart
+                    cur_frac_coords = cart_to_frac_coords(
+                        cur_cart_coords, lengths, angles, num_atoms)
+
+                    if gt_atom_types is None:
+                        cur_atom_types = torch.argmax(pred_atom_types, dim=1) + 1
+
+                    if ld_kwargs.save_traj:
+                        all_frac_coords.append(cur_frac_coords)
+                        all_pred_cart_coord_diff.append(
+                            step_size * pred_cart_coord_diff)
+                        all_noise_cart.append(noise_cart)
+                        all_atom_types.append(cur_atom_types)
+
+            output_dict = {'num_atoms': num_atoms, 'lengths': lengths, 'angles': angles,
+                        'frac_coords': cur_frac_coords, 'atom_types': cur_atom_types,
+                        'is_traj': False}
+
+            if ld_kwargs.save_traj:
+                output_dict.update(dict(
+                    all_frac_coords=torch.stack(all_frac_coords, dim=0),
+                    all_atom_types=torch.stack(all_atom_types, dim=0),
+                    all_pred_cart_coord_diff=torch.stack(
+                        all_pred_cart_coord_diff, dim=0),
+                    all_noise_cart=torch.stack(all_noise_cart, dim=0),
+                    is_traj=True))
+
+            return output_dict
+        
         if ld_kwargs.save_traj:
             all_frac_coords = []
             all_pred_cart_coord_diff = []
@@ -283,8 +369,69 @@ class CDVAE(BaseModule):
         if gt_num_atoms is not None:
             num_atoms = gt_num_atoms
 
-        # obtain atom types.
+        # # obtain atom types.
+
+        # # Example data
+        # atom_types = tsach_atom_types - 1 # actual types with one subtracted out to match 
+        #                                     #the indexing in the atom_type_probs tensor
+
+        # #move both to the cpu 
+        # atom_types = atom_types.cpu()
+        # # print('atom_types is ', atom_types) 
+        # num_atoms = num_atoms.cpu()
+        # # print('num_atoms is ', num_atoms)
+        
+        # # Determine the crystal each atom belongs to and which types are in each crystal
+        # range_tensor = torch.arange(len(num_atoms))
+        # # print('range_tensor is ', range_tensor)
+        # range_tensor = range_tensor.cpu()
+
+        # crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
+        # # print('crystal_ids is ', crystal_ids)
+
+        # #get the unique crystal ids in the list 
+        # unique_crystal_ids = crystal_ids.unique()
+        # # print('unique_crystal_ids is ', unique_crystal_ids)
+        # crystal_to_atom_types = {crystal_id.item(): atom_types[crystal_ids == crystal_id].unique() for crystal_id in unique_crystal_ids}
+        # # print('crystal_to_atom_types is ', crystal_to_atom_types)
+
+        # predicted atom type probabilities
         composition_per_atom = F.softmax(composition_per_atom, dim=-1)
+        
+        # # Create a mask for the probabilities
+        # mask = torch.zeros_like(composition_per_atom, dtype=torch.bool)
+        # #put the mask on cuda 0
+        # mask = mask.cuda(0)
+
+        # for i, (atom_type, crystal_id) in enumerate(zip(atom_types, crystal_ids)):
+        #     # print('i is ', i)
+        #     # print('atom_type is ', atom_type)
+        #     crystal_id = crystal_id.item()
+        #     # print('crystal_id is ', crystal_id)
+
+        #     # Get the unique atom types for the current crystal
+        #     atom_types_in_crystal = crystal_to_atom_types[crystal_id]
+        #     # print('atom_types_in_crystal is ', atom_types_in_crystal)
+            
+        #     # Ensure atom_types_in_crystal is of the correct dtype for indexing
+        #     atom_types_in_crystal = atom_types_in_crystal.to(dtype=torch.long)
+
+        #     # Set the mask to 1 for the positions matching the atom types in the same crystal
+        #     mask[i, atom_types_in_crystal] = 1
+
+        # epsilon = 1e-10
+        # # print(atom_type_probs)
+        # # print(mask)
+        # composition_per_atom = composition_per_atom + epsilon
+        # # print(atom_type_probs)
+        # composition_per_atom = composition_per_atom * mask.float()
+        # # print(atom_type_probs)
+
+        #put the composition per atom on cuda 0
+        composition_per_atom = composition_per_atom.cuda(0)
+        #put num_atoms on cuda 0
+        num_atoms = num_atoms.cuda(0)
+
         if gt_atom_types is None:
             cur_atom_types = self.sample_composition(
                 composition_per_atom, num_atoms)
@@ -301,31 +448,12 @@ class CDVAE(BaseModule):
             step_size = ld_kwargs.step_lr * (sigma / self.sigmas[-1]) ** 2
 
             for step in range(ld_kwargs.n_step_each):
+                noise_cart = torch.randn_like(
+                    cur_frac_coords) * torch.sqrt(step_size * 2)
 
-                trials = 100
-                for trial in range(trials):
-                    noise_cart = torch.randn_like(
-                        cur_frac_coords) * torch.sqrt(step_size * 2)
-                    
-                    # #print the arguments to the decoder
-                    # print('z is ', z)
-                    print('cur_frac_coords is ', cur_frac_coords)
-                    print('cur_atom_types is ', cur_atom_types)
-                    print('num_atoms is ', num_atoms)
-                    # print('lengths is ', lengths)
-                    # print('angles is ', angles)
-                    try: 
-                        pred_cart_coord_diff, pred_atom_types = self.decoder(
-                            z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
-                        break
-                    except:
-                        cur_cart_coords = frac_to_cart_coords(cur_frac_coords, lengths, angles, num_atoms)
-                        pred_cart_coord_diff = pred_cart_coord_diff / sigma
-                        cur_cart_coords = cur_cart_coords + step_size * pred_cart_coord_diff + noise_cart
-                        cur_frac_coords = cart_to_frac_coords(
-                            cur_cart_coords, lengths, angles, num_atoms)
-                        continue
-
+                pred_cart_coord_diff, pred_atom_types = self.decoder(
+                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+ 
                 cur_cart_coords = frac_to_cart_coords(
                     cur_frac_coords, lengths, angles, num_atoms)
                 pred_cart_coord_diff = pred_cart_coord_diff / sigma
@@ -365,11 +493,95 @@ class CDVAE(BaseModule):
         return samples
 
     def forward(self, batch, teacher_forcing, training):
+
         batch_reserve = batch
         xrd_int = batch_reserve[1]
         xrd_loc = batch_reserve[2]
         atom_spec = batch_reserve[3]
         batch = batch[0]
+
+        if self.useoriginal:
+            # hacky way to resolve the NaN issue. Will need more careful debugging later.
+            mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
+
+            (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
+            pred_composition_per_atom) = self.decode_stats(
+                z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
+
+            # sample noise levels.
+            noise_level = torch.randint(0, self.sigmas.size(0),
+                                        (batch.num_atoms.size(0),),
+                                        device=self.device)
+            used_sigmas_per_atom = self.sigmas[noise_level].repeat_interleave(
+                batch.num_atoms, dim=0)
+
+            type_noise_level = torch.randint(0, self.type_sigmas.size(0),
+                                            (batch.num_atoms.size(0),),
+                                            device=self.device)
+            used_type_sigmas_per_atom = (
+                self.type_sigmas[type_noise_level].repeat_interleave(
+                    batch.num_atoms, dim=0))
+
+            # add noise to atom types and sample atom types.
+            pred_composition_probs = F.softmax(
+                pred_composition_per_atom.detach(), dim=-1)
+            atom_type_probs = (
+                F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
+                pred_composition_probs * used_type_sigmas_per_atom[:, None])
+            rand_atom_types = torch.multinomial(
+                atom_type_probs, num_samples=1).squeeze(1) + 1
+
+            # add noise to the cart coords
+            cart_noises_per_atom = (
+                torch.randn_like(batch.frac_coords) *
+                used_sigmas_per_atom[:, None])
+            cart_coords = frac_to_cart_coords(
+                batch.frac_coords, pred_lengths, pred_angles, batch.num_atoms)
+            cart_coords = cart_coords + cart_noises_per_atom
+            noisy_frac_coords = cart_to_frac_coords(
+                cart_coords, pred_lengths, pred_angles, batch.num_atoms)
+
+            pred_cart_coord_diff, pred_atom_types = self.decoder(
+                z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
+
+            # compute loss.
+            num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
+            lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
+            composition_loss = self.composition_loss(
+                pred_composition_per_atom, batch.atom_types, batch)
+            coord_loss = self.coord_loss(
+                pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
+            type_loss = self.type_loss(pred_atom_types, batch.atom_types,
+                                    used_type_sigmas_per_atom, batch)
+
+            kld_loss = self.kld_loss(mu, log_var)
+
+            if self.hparams.predict_property:
+                property_loss = self.property_loss(z, batch)
+            else:
+                property_loss = 0.
+
+            return {
+                'num_atom_loss': num_atom_loss,
+                'lattice_loss': lattice_loss,
+                'composition_loss': composition_loss,
+                'coord_loss': coord_loss,
+                'type_loss': type_loss,
+                'kld_loss': kld_loss,
+                'property_loss': property_loss,
+                'pred_num_atoms': pred_num_atoms,
+                'pred_lengths_and_angles': pred_lengths_and_angles,
+                'pred_lengths': pred_lengths,
+                'pred_angles': pred_angles,
+                'pred_cart_coord_diff': pred_cart_coord_diff,
+                'pred_atom_types': pred_atom_types,
+                'pred_composition_per_atom': pred_composition_per_atom,
+                'target_frac_coords': batch.frac_coords,
+                'target_atom_types': batch.atom_types,
+                'rand_frac_coords': noisy_frac_coords,
+                'rand_atom_types': rand_atom_types,
+                'z': z,
+            }
 
         # hacky way to resolve the NaN issue. Will need more careful debugging later.
         mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
@@ -393,13 +605,69 @@ class CDVAE(BaseModule):
         used_type_sigmas_per_atom = (
             self.type_sigmas[type_noise_level].repeat_interleave(
                 batch.num_atoms, dim=0))
+        
+        # Example data
+        atom_types = batch.atom_types - 1 # actual types with one subtracted out to match 
+                                            #the indexing in the atom_type_probs tensor
+        # print('atom_types is ', atom_types)
+        num_atoms = batch.num_atoms  # atoms per crystal
+        # print('num_atoms is ', num_atoms)
 
+        #move both to the cpu 
+        atom_types = atom_types.cpu()
+        # print('atom_types is ', atom_types) 
+        num_atoms = num_atoms.cpu()
+        # print('num_atoms is ', num_atoms)
+        
+        # Determine the crystal each atom belongs to and which types are in each crystal
+        range_tensor = torch.arange(len(num_atoms))
+        # print('range_tensor is ', range_tensor)
+        range_tensor = range_tensor.cpu()
+
+        crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
+        # print('crystal_ids is ', crystal_ids)
+
+        #get the unique crystal ids in the list 
+        unique_crystal_ids = crystal_ids.unique()
+        # print('unique_crystal_ids is ', unique_crystal_ids)
+        crystal_to_atom_types = {crystal_id.item(): atom_types[crystal_ids == crystal_id].unique() for crystal_id in unique_crystal_ids}
+        # print('crystal_to_atom_types is ', crystal_to_atom_types)
         # add noise to atom types and sample atom types.
         pred_composition_probs = F.softmax(
             pred_composition_per_atom.detach(), dim=-1)
         atom_type_probs = (
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
+        
+        # Create a mask for the probabilities
+        mask = torch.zeros_like(atom_type_probs, dtype=torch.bool)
+        #put the mask on cuda 0
+        mask = mask.cuda(0)
+
+        for i, (atom_type, crystal_id) in enumerate(zip(atom_types, crystal_ids)):
+            # print('i is ', i)
+            # print('atom_type is ', atom_type)
+            crystal_id = crystal_id.item()
+            # print('crystal_id is ', crystal_id)
+
+            # Get the unique atom types for the current crystal
+            atom_types_in_crystal = crystal_to_atom_types[crystal_id]
+            # print('atom_types_in_crystal is ', atom_types_in_crystal)
+            
+            # Ensure atom_types_in_crystal is of the correct dtype for indexing
+            atom_types_in_crystal = atom_types_in_crystal.to(dtype=torch.long)
+
+            # Set the mask to 1 for the positions matching the atom types in the same crystal
+            mask[i, atom_types_in_crystal] = 1
+
+        epsilon = 1e-10
+        # print(atom_type_probs)
+        # print(mask)
+        atom_type_probs = atom_type_probs + epsilon
+        # print(atom_type_probs)
+        atom_type_probs = atom_type_probs * mask.float()
+        # print(atom_type_probs)
+
         rand_atom_types = torch.multinomial(
             atom_type_probs, num_samples=1).squeeze(1) + 1
 
@@ -444,7 +712,6 @@ class CDVAE(BaseModule):
             kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
         else:
             kld_loss = self.kld_loss(mu, log_var)
-            kld_loss = 0
 
         if self.hparams.predict_property:
             property_loss = self.property_loss(z, batch)
@@ -623,7 +890,7 @@ class CDVAE(BaseModule):
             dim=0
         )
 
-        print("kld_loss: ", kld_loss)
+        # print("kld_loss: ", kld_loss)
         return kld_loss
     
 

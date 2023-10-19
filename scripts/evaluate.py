@@ -49,18 +49,21 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
         #_, _, z = model.prior_encode(batch)
 
         for eval_idx in range(num_evals):
+            # set force atom types to be true 
+            force_num_atoms = True
+            
             gt_num_atoms = batch.num_atoms if force_num_atoms else None
+
             gt_atom_types = batch.atom_types if force_atom_types else None
 
-            #print out the arguments into the langevin_dynamics function
-            print("z: ", z)
-            print("ld_kwargs: ", ld_kwargs)
-            print("gt_num_atoms: ", gt_num_atoms)
-            print("gt_atom_types: ", gt_atom_types)
+            # #print out the arguments into the langevin_dynamics function
+            # print("z: ", z)
+            # print("ld_kwargs: ", ld_kwargs)
+            # print("gt_num_atoms: ", gt_num_atoms)
+            # print("gt_atom_types: ", gt_atom_types)
             
-
             outputs = model.langevin_dynamics(
-                z, ld_kwargs, gt_num_atoms, gt_atom_types)
+                z, ld_kwargs, gt_num_atoms, gt_atom_types, tsach_atom_types=batch.atom_types)
 
             # collect sampled crystals in this batch.
             batch_frac_coords.append(outputs['frac_coords'].detach().cpu())
@@ -86,7 +89,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             all_atom_types_stack.append(
                 torch.stack(batch_all_atom_types, dim=0))
 
-        print(batch)
+        # print(batch)
         
         # Save the ground truth structure
         input_data_list = input_data_list + batch.to_data_list()
@@ -295,6 +298,7 @@ if __name__ == '__main__':
     parser.add_argument('--start_from', default='data', type=str)
     parser.add_argument('--batch_size', default=500, type=int)
     parser.add_argument('--force_num_atoms', action='store_true')
+    #if you want to force atom types you would input --force_atom_types 
     parser.add_argument('--force_atom_types', action='store_true')
     parser.add_argument('--down_sample_traj_step', default=10, type=int)
     parser.add_argument('--label', default='')
