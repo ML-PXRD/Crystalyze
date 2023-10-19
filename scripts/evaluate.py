@@ -45,8 +45,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch_lengths, batch_angles = [], []
 
             # only sample one z, multiple evals for stoichaticity in langevin dynamics
-            _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
-            #_, _, z = model.prior_encode(batch)
+            #_, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
+            _, _, z = model.prior_encode(batch)
 
             for eval_idx in range(num_evals):
                 # set force atom types to be true 
