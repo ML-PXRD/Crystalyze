@@ -143,7 +143,7 @@ class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
         self.use_cond_kld = kwargs.pop("use_cond_kld", False)  # provide a default in case it's not in the config
         self.useoriginal = kwargs.pop("useoriginal", True)  # provide a default in case it's not in the config
-        self.number_of_conditionals = kwargs.pop("number_of_conditionals", 1)  # provide a default in case it's not in the config
+        self.number_of_conditionals = kwargs.pop("number_of_conditionals", 3)  # provide a default in case it's not in the config
 
         super().__init__(*args, **kwargs)
 

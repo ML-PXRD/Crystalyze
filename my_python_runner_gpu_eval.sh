@@ -19,5 +19,6 @@ source /state/partition1/llgrid/pkg/anaconda/anaconda3-2023a/etc/profile.d/conda
 conda activate cdvae
 #python test_python_script.py
 #python cdvae/run.py data=perov expname=perov
-python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms
+echo "Second argument is $2"
+python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2
 python scripts/compute_metrics.py --root_path $1 --tasks recon
