@@ -106,6 +106,7 @@ def run(cfg: DictConfig) -> None:
         logging=cfg.logging,
         use_cond_kld=cfg.model.use_cond_kld,
         useoriginal=cfg.model.useoriginal,
+        number_of_conditionals = cfg.model.number_of_conditionals,
         _recursive_=False,
     )
 

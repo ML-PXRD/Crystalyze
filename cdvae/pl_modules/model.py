@@ -143,6 +143,7 @@ class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
         self.use_cond_kld = kwargs.pop("use_cond_kld", False)  # provide a default in case it's not in the config
         self.useoriginal = kwargs.pop("useoriginal", True)  # provide a default in case it's not in the config
+        self.number_of_conditionals = kwargs.pop("number_of_conditionals", 1)  # provide a default in case it's not in the config
 
         super().__init__(*args, **kwargs)
 
@@ -169,6 +170,9 @@ class CDVAE(BaseModule):
         
         # self.atomic_and_diffraction_encoder = build_mlp(768, 256, 2, 256)
         self.atomic_and_diffraction_encoder = build_mlp(512, 256, 2, 256)
+
+        #make an encoder for the prior that goes from 768 to 256
+        self.prior_encoder = build_mlp(256*self.number_of_conditionals, 256, 2, 256)
 
         # for property prediction.
         if self.hparams.predict_property:
@@ -209,9 +213,20 @@ class CDVAE(BaseModule):
         eps = torch.randn_like(std)
         return eps * std + mu
     
-    def prior_encode(self, batch, xrd_int, xrd_loc, atom_spec):   
+    def prior_encode(self, batch, xrd_int, xrd_loc, atom_spec):
+        #concatenate together xrd_int, xrd_loc, and atom_spec
+        #the concatenated tensor is 256 x 768
+        if self.number_of_conditionals == 1: 
+            concat_xrd_loc_atom_spec = xrd_loc
+        elif self.number_of_conditionals == 2:
+            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+        elif self.number_of_conditionals == 3:
+            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
+        elif self.number_of_conditionals > 3:
+            raise ValueError('The number of conditionals must be 1, 2, or 3')
+        
         #using just the xrd_loc as the encoding for now
-        encoding = xrd_loc
+        encoding = self.prior_encoder(concat_xrd_loc_atom_spec)
         mu = self.prior_mu(encoding)
         log_var = self.prior_var(encoding)
 
@@ -356,6 +371,74 @@ class CDVAE(BaseModule):
                     is_traj=True))
 
             return output_dict
+        
+        elif self.use_cond_kld:
+            if ld_kwargs.save_traj:
+                all_frac_coords = []
+                all_pred_cart_coord_diff = []
+                all_noise_cart = []
+                all_atom_types = []
+
+            # obtain key stats.
+            num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats(
+                z, gt_num_atoms)
+            if gt_num_atoms is not None:
+                num_atoms = gt_num_atoms
+
+            # obtain atom types.
+            composition_per_atom = F.softmax(composition_per_atom, dim=-1)
+            if gt_atom_types is None:
+                cur_atom_types = self.sample_composition(
+                    composition_per_atom, num_atoms)
+            else:
+                cur_atom_types = gt_atom_types
+
+            # init coords.
+            cur_frac_coords = torch.rand((num_atoms.sum(), 3), device=z.device)
+
+            # annealed langevin dynamics.
+            for sigma in tqdm(self.sigmas, total=self.sigmas.size(0), disable=ld_kwargs.disable_bar):
+                if sigma < ld_kwargs.min_sigma:
+                    break
+                step_size = ld_kwargs.step_lr * (sigma / self.sigmas[-1]) ** 2
+
+                for step in range(ld_kwargs.n_step_each):
+                    noise_cart = torch.randn_like(
+                        cur_frac_coords) * torch.sqrt(step_size * 2)
+                    pred_cart_coord_diff, pred_atom_types = self.decoder(
+                        z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+                    cur_cart_coords = frac_to_cart_coords(
+                        cur_frac_coords, lengths, angles, num_atoms)
+                    pred_cart_coord_diff = pred_cart_coord_diff / sigma
+                    cur_cart_coords = cur_cart_coords + step_size * pred_cart_coord_diff + noise_cart
+                    cur_frac_coords = cart_to_frac_coords(
+                        cur_cart_coords, lengths, angles, num_atoms)
+
+                    if gt_atom_types is None:
+                        cur_atom_types = torch.argmax(pred_atom_types, dim=1) + 1
+
+                    if ld_kwargs.save_traj:
+                        all_frac_coords.append(cur_frac_coords)
+                        all_pred_cart_coord_diff.append(
+                            step_size * pred_cart_coord_diff)
+                        all_noise_cart.append(noise_cart)
+                        all_atom_types.append(cur_atom_types)
+
+            output_dict = {'num_atoms': num_atoms, 'lengths': lengths, 'angles': angles,
+                        'frac_coords': cur_frac_coords, 'atom_types': cur_atom_types,
+                        'is_traj': False}
+
+            if ld_kwargs.save_traj:
+                output_dict.update(dict(
+                    all_frac_coords=torch.stack(all_frac_coords, dim=0),
+                    all_atom_types=torch.stack(all_atom_types, dim=0),
+                    all_pred_cart_coord_diff=torch.stack(
+                        all_pred_cart_coord_diff, dim=0),
+                    all_noise_cart=torch.stack(all_noise_cart, dim=0),
+                    is_traj=True))
+
+            return output_dict
+
         
         if ld_kwargs.save_traj:
             all_frac_coords = []
@@ -555,6 +638,91 @@ class CDVAE(BaseModule):
                                     used_type_sigmas_per_atom, batch)
 
             kld_loss = self.kld_loss(mu, log_var)
+
+            if self.hparams.predict_property:
+                property_loss = self.property_loss(z, batch)
+            else:
+                property_loss = 0.
+
+            return {
+                'num_atom_loss': num_atom_loss,
+                'lattice_loss': lattice_loss,
+                'composition_loss': composition_loss,
+                'coord_loss': coord_loss,
+                'type_loss': type_loss,
+                'kld_loss': kld_loss,
+                'property_loss': property_loss,
+                'pred_num_atoms': pred_num_atoms,
+                'pred_lengths_and_angles': pred_lengths_and_angles,
+                'pred_lengths': pred_lengths,
+                'pred_angles': pred_angles,
+                'pred_cart_coord_diff': pred_cart_coord_diff,
+                'pred_atom_types': pred_atom_types,
+                'pred_composition_per_atom': pred_composition_per_atom,
+                'target_frac_coords': batch.frac_coords,
+                'target_atom_types': batch.atom_types,
+                'rand_frac_coords': noisy_frac_coords,
+                'rand_atom_types': rand_atom_types,
+                'z': z,
+            }
+
+        elif self.use_cond_kld:
+            # hacky way to resolve the NaN issue. Will need more careful debugging later.
+            mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
+    
+            prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)        
+
+            (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
+            pred_composition_per_atom) = self.decode_stats(
+                z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
+
+            # sample noise levels.
+            noise_level = torch.randint(0, self.sigmas.size(0),
+                                        (batch.num_atoms.size(0),),
+                                        device=self.device)
+            used_sigmas_per_atom = self.sigmas[noise_level].repeat_interleave(
+                batch.num_atoms, dim=0)
+
+            type_noise_level = torch.randint(0, self.type_sigmas.size(0),
+                                            (batch.num_atoms.size(0),),
+                                            device=self.device)
+            used_type_sigmas_per_atom = (
+                self.type_sigmas[type_noise_level].repeat_interleave(
+                    batch.num_atoms, dim=0))
+
+            # add noise to atom types and sample atom types.
+            pred_composition_probs = F.softmax(
+                pred_composition_per_atom.detach(), dim=-1)
+            atom_type_probs = (
+                F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
+                pred_composition_probs * used_type_sigmas_per_atom[:, None])
+            rand_atom_types = torch.multinomial(
+                atom_type_probs, num_samples=1).squeeze(1) + 1
+
+            # add noise to the cart coords
+            cart_noises_per_atom = (
+                torch.randn_like(batch.frac_coords) *
+                used_sigmas_per_atom[:, None])
+            cart_coords = frac_to_cart_coords(
+                batch.frac_coords, pred_lengths, pred_angles, batch.num_atoms)
+            cart_coords = cart_coords + cart_noises_per_atom
+            noisy_frac_coords = cart_to_frac_coords(
+                cart_coords, pred_lengths, pred_angles, batch.num_atoms)
+
+            pred_cart_coord_diff, pred_atom_types = self.decoder(
+                z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
+
+            # compute loss.
+            num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
+            lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
+            composition_loss = self.composition_loss(
+                pred_composition_per_atom, batch.atom_types, batch)
+            coord_loss = self.coord_loss(
+                pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
+            type_loss = self.type_loss(pred_atom_types, batch.atom_types,
+                                    used_type_sigmas_per_atom, batch)
+
+            kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
 
             if self.hparams.predict_property:
                 property_loss = self.property_loss(z, batch)
