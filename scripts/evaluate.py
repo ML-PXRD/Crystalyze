@@ -48,6 +48,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             #_, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
             _, _, z = model.prior_encode(batch)
 
+            #this edit is just in optimization
+
             for eval_idx in range(num_evals):
                 # set force atom types to be true 
                 force_num_atoms = True
