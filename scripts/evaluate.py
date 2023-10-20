@@ -59,9 +59,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
             #do you wanna do optimization?
-            optimization = False
-
-            
+            optimization = True
             if optimization:
                 num_gradient_steps=50000
                 lr=1e-3
