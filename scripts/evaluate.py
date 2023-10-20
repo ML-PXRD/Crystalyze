@@ -33,6 +33,12 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             atom_spec = batch_reserve[3]
             batch = batch[0]
 
+            #put everything on the gpu
+            xrd_int = xrd_int.cuda()
+            xrd_loc = xrd_loc.cuda()
+            atom_spec = atom_spec.cuda()
+            batch = batch.cuda()
+
             print(idx)
             print(batch)
 
@@ -46,7 +52,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
             # only sample one z, multiple evals for stoichaticity in langevin dynamics
             #_, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
-            _, _, z = model.prior_encode(batch)
+            _, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
             #this edit is just in optimization
 

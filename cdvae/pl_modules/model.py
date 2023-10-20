@@ -244,31 +244,16 @@ class CDVAE(BaseModule):
             z = self.reparameterize(mu, log_var)
             return mu, log_var, z
 
-        #concatenate the xrd_loc, xrd_int, and atom_spec, each of which are 256 x 256 tensors
-        #the concatenated tensor is 256 x 768
-        # concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
-        concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+        elif not self.use_cond_kld:
+            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+            concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
+            non_cond_z = self.atomic_and_diffraction_encoder(concat_xrd_loc_atom_spec)
+            non_cond_z = non_cond_z.cuda(0)
 
-        concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
+            useless_mu = self.fc_mu(hidden) #these are just placeholders to avoid breaking the code
+            useless_log_var = self.fc_var(hidden) # the kld will be zeroed out in the loss function
 
-        #put the xrd_loc and atom_spec through a series of mlps to go from a 256 x 768  tensor to a 256 x 256 tensor
-        non_cond_z = self.atomic_and_diffraction_encoder(concat_xrd_loc_atom_spec)
-
-        #put the non_cond_z on cuda 0 if it's not already there
-        non_cond_z = non_cond_z.cuda(0)
-
-        #put the hidden on cuda 0 if it's not already there
-        hidden = hidden.cuda(0)
-
-        combined_hidden = hidden * non_cond_z
-        cond_mu = self.fc_mu(combined_hidden)
-        cond_log_var = self.fc_var(combined_hidden)
-        cond_z2 = self.reparameterize(cond_mu, cond_log_var)
-
-        if self.use_cond_kld:
-            return cond_mu, cond_log_var, cond_z2
-        else:
-            return cond_mu, cond_log_var, non_cond_z
+            return useless_mu, useless_log_var, non_cond_z
 
     def decode_stats(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
                      teacher_forcing=False):
@@ -667,9 +652,95 @@ class CDVAE(BaseModule):
             }
 
         elif self.use_cond_kld:
+
             # hacky way to resolve the NaN issue. Will need more careful debugging later.
             mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
-    
+
+            prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)        
+
+            (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
+            pred_composition_per_atom) = self.decode_stats(
+                z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
+
+            # sample noise levels.
+            noise_level = torch.randint(0, self.sigmas.size(0),
+                                        (batch.num_atoms.size(0),),
+                                        device=self.device)
+            used_sigmas_per_atom = self.sigmas[noise_level].repeat_interleave(
+                batch.num_atoms, dim=0)
+
+            type_noise_level = torch.randint(0, self.type_sigmas.size(0),
+                                            (batch.num_atoms.size(0),),
+                                            device=self.device)
+            used_type_sigmas_per_atom = (
+                self.type_sigmas[type_noise_level].repeat_interleave(
+                    batch.num_atoms, dim=0))
+
+            # add noise to atom types and sample atom types.
+            pred_composition_probs = F.softmax(
+                pred_composition_per_atom.detach(), dim=-1)
+            atom_type_probs = (
+                F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
+                pred_composition_probs * used_type_sigmas_per_atom[:, None])
+            rand_atom_types = torch.multinomial(
+                atom_type_probs, num_samples=1).squeeze(1) + 1
+
+            # add noise to the cart coords
+            cart_noises_per_atom = (
+                torch.randn_like(batch.frac_coords) *
+                used_sigmas_per_atom[:, None])
+            cart_coords = frac_to_cart_coords(
+                batch.frac_coords, pred_lengths, pred_angles, batch.num_atoms)
+            cart_coords = cart_coords + cart_noises_per_atom
+            noisy_frac_coords = cart_to_frac_coords(
+                cart_coords, pred_lengths, pred_angles, batch.num_atoms)
+
+            pred_cart_coord_diff, pred_atom_types = self.decoder(
+                z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
+
+            # compute loss.
+            num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
+            lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
+            composition_loss = self.composition_loss(
+                pred_composition_per_atom, batch.atom_types, batch)
+            coord_loss = self.coord_loss(
+                pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
+            type_loss = self.type_loss(pred_atom_types, batch.atom_types,
+                                    used_type_sigmas_per_atom, batch)
+
+            kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
+
+            if self.hparams.predict_property:
+                property_loss = self.property_loss(z, batch)
+            else:
+                property_loss = 0.
+
+            return {
+                'num_atom_loss': num_atom_loss,
+                'lattice_loss': lattice_loss,
+                'composition_loss': composition_loss,
+                'coord_loss': coord_loss,
+                'type_loss': type_loss,
+                'kld_loss': kld_loss,
+                'property_loss': property_loss,
+                'pred_num_atoms': pred_num_atoms,
+                'pred_lengths_and_angles': pred_lengths_and_angles,
+                'pred_lengths': pred_lengths,
+                'pred_angles': pred_angles,
+                'pred_cart_coord_diff': pred_cart_coord_diff,
+                'pred_atom_types': pred_atom_types,
+                'pred_composition_per_atom': pred_composition_per_atom,
+                'target_frac_coords': batch.frac_coords,
+                'target_atom_types': batch.atom_types,
+                'rand_frac_coords': noisy_frac_coords,
+                'rand_atom_types': rand_atom_types,
+                'z': z,
+            }
+        
+        else :
+            # hacky way to resolve the NaN issue. Will need more careful debugging later.
+            mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
+
             prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)        
 
             (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
