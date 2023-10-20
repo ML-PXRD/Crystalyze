@@ -16,6 +16,9 @@ from pymatgen.analysis.structure_matcher import StructureMatcher
 from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
 from matminer.featurizers.composition.composite import ElementProperty
 
+#added by Tsach
+
+
 from eval_utils import (
     smact_validity, structure_validity, CompScaler, get_fp_pdist,
     load_config, load_data, get_crystals_list, prop_model_eval, compute_cov)
@@ -96,7 +99,11 @@ class Crystal(object):
             return
         self.struct_fp = np.array(site_fps).mean(axis=0)
 
-
+from pymatgen.core.structure import Structure
+from pymatgen.core.periodic_table import Element
+from pymatgen.core.lattice import Lattice
+from pymatgen.analysis.diffraction.xrd import XRDCalculator
+xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
 class RecEval(object):
 
     def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #modified by Tsach from the original values of stol=0.5, angle_tol=10, ltol=0.3
@@ -117,17 +124,51 @@ class RecEval(object):
                 return rms_dist
             except Exception:
                 return None
+        #define a function that gets the diffraction patterns for pred and gt and returns the RMSD between them
+        def process_diff_pattern(pred, gt, is_valid):
+            if not is_valid:
+                return None
+            try:
+                #get the structures
+                pred_structure = pred.structure
+                gt_structure = gt.structure
+                pred_pattern = xrd_calculator.get_pattern(pred_structure)
+                gt_pattern = xrd_calculator.get_pattern(gt_structure)
+
+                pred_adjusted_vector = np.zeros(256)
+                minimum = min(256, len(pred_pattern.x))
+                pred_adjusted_vector[:minimum] = pred_pattern.x[:minimum]
+
+                gt_adjusted_vector = np.zeros(256)
+                minimum = min(256, len(gt_pattern.x))
+                gt_adjusted_vector[:minimum] = gt_pattern.x[:minimum]
+                
+                #calculate the RMSD between the two patterns
+                rms_dist = np.sqrt(np.mean((pred_adjusted_vector - gt_adjusted_vector)**2))
+
+                return rms_dist
+            except Exception:
+                return None    
+
         validity = [c.valid for c in self.preds]
 
         rms_dists = []
+        diff_dists = []
         for i in tqdm(range(len(self.preds))):
             rms_dists.append(process_one(
                 self.preds[i], self.gts[i], validity[i]))
+            diff_dists.append(process_diff_pattern(self.preds[i], self.gts[i], validity[i]))
         rms_dists = np.array(rms_dists)
+        diff_dists = np.array(diff_dists)
+        average_diff_dist = diff_dists[diff_dists != None].mean()
+        #print out all the diff dists
+        print("diff_dists: ", diff_dists)
         match_rate = sum(rms_dists != None) / len(self.preds)
         mean_rms_dist = rms_dists[rms_dists != None].mean()
+
         return {'match_rate': match_rate,
-                'rms_dist': mean_rms_dist}
+                'rms_dist': mean_rms_dist,
+                'diff_dist': average_diff_dist}
 
     def get_metrics(self):
         return self.get_match_rate_and_rms()

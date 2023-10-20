@@ -145,7 +145,7 @@ class CDVAE(BaseModule):
         self.useoriginal = kwargs.pop("useoriginal", True)  # provide a default in case it's not in the config
         self.number_of_conditionals = kwargs.pop("number_of_conditionals", 3)  # provide a default in case it's not in the config
         self.use_new_loss = kwargs.pop("use_new_loss", False)  # provide a default in case it's not in the config
-        self.predict_diffraction_pattern = kwargs.pop("predict_diffraction_pattern", False)  # provide a default in case it's not in the config
+        self.predict_diffraction_pattern = kwargs.pop("predict_diffraction_pattern", True)  # provide a default in case it's not in the config
 
         super().__init__(*args, **kwargs)
 
@@ -636,7 +636,8 @@ class CDVAE(BaseModule):
             property_loss = 0.
         
         if self.predict_diffraction_pattern: 
-            property_loss = 1000*self.diffraction_property_loss(z, xrd_loc)
+            print("cosine similarity loss")
+            property_loss = 1000*self.diffraction_property_loss_cosine_similarity(z, xrd_loc)
 
         return {
             'num_atom_loss': num_atom_loss,
@@ -899,6 +900,9 @@ class CDVAE(BaseModule):
     
     def diffraction_property_loss(self, z, xrd_loc):
         return F.mse_loss(self.fc_diffraction_pattern(z), xrd_loc)
+
+    def diffraction_property_loss_cosine_similarity(self, z, xrd_loc):
+        return F.cosine_similarity(self.fc_diffraction_pattern(z), xrd_loc)
 
     def lattice_loss(self, pred_lengths_and_angles, batch):
         self.lattice_scaler.match_device(pred_lengths_and_angles)
