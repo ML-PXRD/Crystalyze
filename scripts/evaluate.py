@@ -61,6 +61,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             #do you wanna do optimization?
             optimization = True
             if optimization:
+                z = z.detach().clone().requires_grad_()
                 num_gradient_steps=50000
                 lr=1e-3
                 opt = Adam([z], lr=lr)

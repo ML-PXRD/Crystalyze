@@ -1,7 +1,12 @@
 _target_: cdvae.pl_modules.model.CDVAE
-use_cond_kld: true # default value, can be overridden
+
+use_cond_kld: false 
 useoriginal: false
 number_of_conditionals: 3
+predict_diffraction_pattern: true
+diffraction_encoder_num_layers: 1
+diffraction_encoder_hidden_dim: 256
+
 hidden_dim: 256
 latent_dim: 256
 fc_num_layers: 1
@@ -13,6 +18,7 @@ cost_lattice: 10.
 cost_composition: 1.
 cost_edge: 10.
 cost_property: 1.
+cost_diffraction: 1.
 beta: 0.01 #originally 0.01, #modified by Tsach for the conditional model
 teacher_forcing_lattice: true
 teacher_forcing_max_epoch: ${data.teacher_forcing_max_epoch}
