@@ -107,6 +107,9 @@ def run(cfg: DictConfig) -> None:
         use_cond_kld=cfg.model.use_cond_kld,
         useoriginal=cfg.model.useoriginal,
         number_of_conditionals = cfg.model.number_of_conditionals,
+        predict_diffraction_pattern = cfg.model.predict_diffraction_pattern,
+        diffraction_encoder_num_layers = cfg.model.diffraction_encoder_num_layers,
+        diffraction_encoder_hidden_dim = cfg.model.diffraction_encoder_hidden_dim,
         _recursive_=False,
     )
 

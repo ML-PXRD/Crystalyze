@@ -170,8 +170,9 @@ class CDVAE(BaseModule):
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
         
         #make an encoders for the diffraction pattern 
-        self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
-                                      self.diffraction_encoder_num_layers, 256)
+        if not self.useoriginal:
+            self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
+                                        self.diffraction_encoder_num_layers, 256)
         
         if self.use_cond_kld:
             self.prior_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
@@ -285,7 +286,7 @@ class CDVAE(BaseModule):
             composition_per_atom = self.predict_composition(z, num_atoms)
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
-    def composition_constraint(atom_types, num_atoms, composition_per_atom):
+    def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
         """
         Restrict the probability distribution from which the atom types are randomly drawn 
         to only include the elements that are present in the crystal.
@@ -346,12 +347,15 @@ class CDVAE(BaseModule):
             num_atoms = gt_num_atoms
 
         # obtain atom types.
-        atom_types = tsach_atom_types - 1
-        atom_types = atom_types.cpu()
-        num_atoms = num_atoms.cpu()
+        if not self.useoriginal:
+            atom_types = tsach_atom_types - 1
+            atom_types = atom_types.cpu()
+            num_atoms = num_atoms.cpu()
 
         composition_per_atom = F.softmax(composition_per_atom, dim=-1)
-        composition_per_atom = self.composition_constraint(atom_types, num_atoms, composition_per_atom)
+
+        if not self.useoriginal:
+            composition_per_atom = self.composition_constraint(atom_types, num_atoms, composition_per_atom)
 
         if gt_atom_types is None:
             cur_atom_types = self.sample_composition(
@@ -443,11 +447,12 @@ class CDVAE(BaseModule):
         used_type_sigmas_per_atom = (
             self.type_sigmas[type_noise_level].repeat_interleave(
                 batch.num_atoms, dim=0))
-
-        atom_types = batch.atom_types - 1 
-        num_atoms = batch.num_atoms  # atoms per crystal
-        atom_types = atom_types.cpu()
-        num_atoms = num_atoms.cpu()
+        
+        if not self.useoriginal:
+            atom_types = batch.atom_types - 1 
+            num_atoms = batch.num_atoms  # atoms per crystal
+            atom_types = atom_types.cpu()
+            num_atoms = num_atoms.cpu()
 
         # add noise to atom types and sample atom types.
         pred_composition_probs = F.softmax(
@@ -455,8 +460,9 @@ class CDVAE(BaseModule):
         atom_type_probs = (
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
-        
-        atom_type_probs = self.composition_constraint(atom_types, num_atoms, atom_type_probs)
+
+        if not self.useoriginal:
+            atom_type_probs = self.composition_constraint(atom_types, num_atoms, atom_type_probs)
 
         rand_atom_types = torch.multinomial(
             atom_type_probs, num_samples=1).squeeze(1) + 1
@@ -474,8 +480,9 @@ class CDVAE(BaseModule):
         pred_cart_coord_diff, pred_atom_types = self.decoder(
             z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
         
-        #get the diffraction pattern from the prediction 
-        decoded_xrd_loc, decoded_xrd_int = self.diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
+        if not self.useoriginal:
+            #get the diffraction pattern from the prediction 
+            decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
         
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
@@ -492,13 +499,17 @@ class CDVAE(BaseModule):
         else:
             property_loss = 0.
 
-        #calculate the diffraction loss
-        diffraction_loss = self.diffraction_pattern_loss(decoded_xrd_loc, decoded_xrd_int, xrd_loc, xrd_int)
-        
+        if self.useoriginal:
+            diffraction_loss = 0.
+        else:
+            #calculate the diffraction loss
+            diffraction_loss = self.diffraction_pattern_loss(decoded_xrd_loc, decoded_xrd_int, xrd_loc, xrd_int)
+
         if self.predict_diffraction_pattern: 
             property_loss = self.diffraction_property_loss(z, xrd_loc, xrd_int)
-
-        return {
+        
+        if self.useoriginal: 
+            return {
             'num_atom_loss': num_atom_loss,
             'lattice_loss': lattice_loss,
             'composition_loss': composition_loss,
@@ -506,7 +517,6 @@ class CDVAE(BaseModule):
             'type_loss': type_loss,
             'kld_loss': kld_loss,
             'property_loss': property_loss,
-            'diffraction_loss': diffraction_loss,
             'pred_num_atoms': pred_num_atoms,
             'pred_lengths_and_angles': pred_lengths_and_angles,
             'pred_lengths': pred_lengths,
@@ -520,6 +530,29 @@ class CDVAE(BaseModule):
             'rand_atom_types': rand_atom_types,
             'z': z,
         }
+        else: 
+            return {
+                'num_atom_loss': num_atom_loss,
+                'lattice_loss': lattice_loss,
+                'composition_loss': composition_loss,
+                'coord_loss': coord_loss,
+                'type_loss': type_loss,
+                'kld_loss': kld_loss,
+                'property_loss': property_loss,
+                'diffraction_loss': diffraction_loss,
+                'pred_num_atoms': pred_num_atoms,
+                'pred_lengths_and_angles': pred_lengths_and_angles,
+                'pred_lengths': pred_lengths,
+                'pred_angles': pred_angles,
+                'pred_cart_coord_diff': pred_cart_coord_diff,
+                'pred_atom_types': pred_atom_types,
+                'pred_composition_per_atom': pred_composition_per_atom,
+                'target_frac_coords': batch.frac_coords,
+                'target_atom_types': batch.atom_types,
+                'rand_frac_coords': noisy_frac_coords,
+                'rand_atom_types': rand_atom_types,
+                'z': z,
+            }
     
     def generate_rand_init(self, pred_composition_per_atom, pred_lengths,
                            pred_angles, num_atoms, batch):
