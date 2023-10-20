@@ -172,7 +172,8 @@ class CDVAE(BaseModule):
         self.atomic_and_diffraction_encoder = build_mlp(512, 256, 2, 256)
 
         #make an encoder for the prior that goes from 768 to 256
-        self.prior_encoder = build_mlp(256*self.number_of_conditionals, 256, 2, 256)
+        self.prior_encoder = build_mlp(256*self.number_of_conditionals, 256, 6, 256)
+        self.post_encoder = build_mlp(256*self.number_of_conditionals, 256, 6, 256)
 
         # for property prediction.
         if self.hparams.predict_property:
@@ -237,23 +238,22 @@ class CDVAE(BaseModule):
         """
         encode crystal structures to latents.
         """
-        hidden = self.encoder(batch)
-        if self.useoriginal:            
+        if self.useoriginal:   
+            hidden = self.encoder(batch)         
             mu = self.fc_mu(hidden)
             log_var = self.fc_var(hidden)
             z = self.reparameterize(mu, log_var)
-            return mu, log_var, z
 
         elif not self.use_cond_kld:
-            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
             concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
-            non_cond_z = self.atomic_and_diffraction_encoder(concat_xrd_loc_atom_spec)
-            non_cond_z = non_cond_z.cuda(0)
+            hidden = self.post_encoder(concat_xrd_loc_atom_spec)
 
-            useless_mu = self.fc_mu(hidden) #these are just placeholders to avoid breaking the code
-            useless_log_var = self.fc_var(hidden) # the kld will be zeroed out in the loss function
+            mu = self.fc_mu(hidden)
+            log_var = self.fc_var(hidden)
+            z = self.reparameterize(mu, log_var)
 
-            return useless_mu, useless_log_var, non_cond_z
+        return mu, log_var, z
 
     def decode_stats(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
                      teacher_forcing=False):
@@ -423,7 +423,6 @@ class CDVAE(BaseModule):
                     is_traj=True))
 
             return output_dict
-
         
         if ld_kwargs.save_traj:
             all_frac_coords = []
@@ -737,17 +736,15 @@ class CDVAE(BaseModule):
                 'z': z,
             }
         
-        else :
+        elif not self.use_cond_kld:
             # hacky way to resolve the NaN issue. Will need more careful debugging later.
             mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
-
-            prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)        
 
             (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
             pred_composition_per_atom) = self.decode_stats(
                 z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
 
-            # sample noise levels.
+            # sample noise levels
             noise_level = torch.randint(0, self.sigmas.size(0),
                                         (batch.num_atoms.size(0),),
                                         device=self.device)
@@ -792,8 +789,8 @@ class CDVAE(BaseModule):
                 pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
             type_loss = self.type_loss(pred_atom_types, batch.atom_types,
                                     used_type_sigmas_per_atom, batch)
-
-            kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
+            
+            kld_loss = self.kld_loss(mu, log_var) 
 
             if self.hparams.predict_property:
                 property_loss = self.property_loss(z, batch)
