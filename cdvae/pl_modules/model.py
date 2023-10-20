@@ -507,9 +507,8 @@ class CDVAE(BaseModule):
 
         if self.predict_diffraction_pattern: 
             property_loss = self.diffraction_property_loss(z, xrd_loc, xrd_int)
-        
-        if self.useoriginal: 
-            return {
+ 
+        return {
             'num_atom_loss': num_atom_loss,
             'lattice_loss': lattice_loss,
             'composition_loss': composition_loss,
@@ -517,6 +516,7 @@ class CDVAE(BaseModule):
             'type_loss': type_loss,
             'kld_loss': kld_loss,
             'property_loss': property_loss,
+            'diffraction_loss': diffraction_loss,
             'pred_num_atoms': pred_num_atoms,
             'pred_lengths_and_angles': pred_lengths_and_angles,
             'pred_lengths': pred_lengths,
@@ -530,29 +530,6 @@ class CDVAE(BaseModule):
             'rand_atom_types': rand_atom_types,
             'z': z,
         }
-        else: 
-            return {
-                'num_atom_loss': num_atom_loss,
-                'lattice_loss': lattice_loss,
-                'composition_loss': composition_loss,
-                'coord_loss': coord_loss,
-                'type_loss': type_loss,
-                'kld_loss': kld_loss,
-                'property_loss': property_loss,
-                'diffraction_loss': diffraction_loss,
-                'pred_num_atoms': pred_num_atoms,
-                'pred_lengths_and_angles': pred_lengths_and_angles,
-                'pred_lengths': pred_lengths,
-                'pred_angles': pred_angles,
-                'pred_cart_coord_diff': pred_cart_coord_diff,
-                'pred_atom_types': pred_atom_types,
-                'pred_composition_per_atom': pred_composition_per_atom,
-                'target_frac_coords': batch.frac_coords,
-                'target_atom_types': batch.atom_types,
-                'rand_frac_coords': noisy_frac_coords,
-                'rand_atom_types': rand_atom_types,
-                'z': z,
-            }
     
     def generate_rand_init(self, pred_composition_per_atom, pred_lengths,
                            pred_angles, num_atoms, batch):
