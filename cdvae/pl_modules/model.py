@@ -145,7 +145,7 @@ class CDVAE(BaseModule):
         self.useoriginal = kwargs.pop("useoriginal", True)  # provide a default in case it's not in the config
         self.number_of_conditionals = kwargs.pop("number_of_conditionals", 3)  # provide a default in case it's not in the config
         self.use_new_loss = kwargs.pop("use_new_loss", False)  # provide a default in case it's not in the config
-        self.predict_diffraction_pattern = kwargs.pop("predict_diffraction_pattern", False)  # provide a default in case it's not in the config
+        self.predict_diffraction_pattern = kwargs.pop("predict_diffraction_pattern", True)  # provide a default in case it's not in the config
 
         super().__init__(*args, **kwargs)
 

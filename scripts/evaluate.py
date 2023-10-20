@@ -9,7 +9,15 @@ from types import SimpleNamespace
 from torch_geometric.data import Batch
 
 from eval_utils import load_model
+from torch.nn import functional as F
 
+def new_dataloader_batch_processor(batch): 
+    batch_reserve = batch
+    xrd_int = batch_reserve[1]
+    xrd_loc = batch_reserve[2]
+    atom_spec = batch_reserve[3]
+    batch = batch[0]
+    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch
 
 def reconstructon(loader, model, ld_kwargs, num_evals,
                   force_num_atoms=False, force_atom_types=False, down_sample_traj_step=1, num_batches=15):
@@ -27,11 +35,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
     for idx, batch in enumerate(loader):
         if idx < num_batches:
-            batch_reserve = batch
-            xrd_int = batch_reserve[1]
-            xrd_loc = batch_reserve[2]
-            atom_spec = batch_reserve[3]
-            batch = batch[0]
+            batch_reserve, xrd_int, xrd_loc, atom_spec, batch = new_dataloader_batch_processor(batch)
 
             #put everything on the gpu
             xrd_int = xrd_int.cuda()
@@ -51,8 +55,27 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch_lengths, batch_angles = [], []
 
             # only sample one z, multiple evals for stoichaticity in langevin dynamics
-            #_, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
-            _, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
+            _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
+            #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
+
+            #do you wanna do optimization?
+            optimization = False
+
+            
+            if optimization:
+                num_gradient_steps=50000
+                lr=1e-3
+                opt = Adam([z], lr=lr)
+                model.freeze()
+                interval = num_gradient_steps // 100
+                for i in tqdm(range(num_gradient_steps)):
+                    opt.zero_grad()
+                    loss = F.mse_loss(model.fc_diffraction_pattern(z), xrd_loc)
+                    loss.backward()
+                    opt.step()
+
+                    if i % interval == 0 or i == (num_gradient_steps-1):
+                        print("loss: ", loss)
 
             #this edit is just in optimization
 
@@ -180,6 +203,7 @@ def optimization(model, ld_kwargs, data_loader,
                  lr=1e-3, num_saved_crys=10):
     if data_loader is not None:
         batch = next(iter(data_loader)).to(model.device)
+        batch_reserve, xrd_int, xrd_loc, atom_spec, batch = new_dataloader_batch_processor(batch)
         _, _, z = model.encode(batch)
         z = z[:num_starting_points].detach().clone()
         z.requires_grad = True
