@@ -99,7 +99,7 @@ class Crystal(object):
 
 class RecEval(object):
 
-    def __init__(self, pred_crys, gt_crys, stol=1, angle_tol=20, ltol=0.6): #modified by Tsach from the original values of stol=0.5, angle_tol=10, ltol=0.3
+    def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #modified by Tsach from the original values of stol=0.5, angle_tol=10, ltol=0.3
         assert len(pred_crys) == len(gt_crys)
         self.matcher = StructureMatcher(
             stol=stol, angle_tol=angle_tol, ltol=ltol)
