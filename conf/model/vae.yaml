@@ -1,5 +1,5 @@
 _target_: cdvae.pl_modules.model.CDVAE
-use_cond_kld: true # default value, can be overridden
+use_cond_kld: false  # default value, can be overridden
 useoriginal: false
 number_of_conditionals: 3
 hidden_dim: 256
