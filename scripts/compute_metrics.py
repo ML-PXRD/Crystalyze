@@ -153,16 +153,22 @@ class RecEval(object):
         validity = [c.valid for c in self.preds]
 
         rms_dists = []
-        diff_dists = []
+        evaluate_diff_pattern = False
+        if evaluate_diff_pattern:
+            diff_dists = []
         for i in tqdm(range(len(self.preds))):
             rms_dists.append(process_one(
                 self.preds[i], self.gts[i], validity[i]))
-            diff_dists.append(process_diff_pattern(self.preds[i], self.gts[i], validity[i]))
+            if evaluate_diff_pattern:
+                diff_dists.append(process_diff_pattern(self.preds[i], self.gts[i], validity[i]))
         rms_dists = np.array(rms_dists)
-        diff_dists = np.array(diff_dists)
-        average_diff_dist = diff_dists[diff_dists != None].mean()
-        #print out all the diff dists
-        print("diff_dists: ", diff_dists)
+        if evaluate_diff_pattern:
+            diff_dists = np.array(diff_dists)
+            average_diff_dist = diff_dists[diff_dists != None].mean()
+            #print out all the diff dists
+            print("diff_dists: ", diff_dists)
+        else:
+            average_diff_dist = None
         match_rate = sum(rms_dists != None) / len(self.preds)
         mean_rms_dist = rms_dists[rms_dists != None].mean()
 
