@@ -150,6 +150,7 @@ class CDVAE(BaseModule):
         self.useoriginal = self.hparams.useoriginal
         self.number_of_conditionals = self.hparams.number_of_conditionals
         self.predict_diffraction_pattern = self.hparams.predict_diffraction_pattern
+
         self.encode_diffraction_pattern = self.hparams.encode_diffraction_pattern
         self.diffraction_encoder_num_layers = self.hparams.diffraction_encoder_num_layers
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
