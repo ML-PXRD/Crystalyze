@@ -150,8 +150,12 @@ class CDVAE(BaseModule):
         self.useoriginal = self.hparams.useoriginal
         self.number_of_conditionals = self.hparams.number_of_conditionals
         self.predict_diffraction_pattern = self.hparams.predict_diffraction_pattern
+
+        self.encode_diffraction_pattern = self.hparams.encode_diffraction_pattern
         self.diffraction_encoder_num_layers = self.hparams.diffraction_encoder_num_layers
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
+        self.use_composition_constraint = self.hparams.use_composition_constraint
+        self.use_diffraction_loss = self.hparams.use_diffraction_loss
 
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
@@ -170,7 +174,7 @@ class CDVAE(BaseModule):
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
         
         #make an encoders for the diffraction pattern 
-        if not self.useoriginal:
+        if self.encode_diffraction_pattern:
             self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
                                         self.diffraction_encoder_num_layers, 256)
         
@@ -254,7 +258,7 @@ class CDVAE(BaseModule):
             log_var = self.fc_var(hidden)
             z = self.reparameterize(mu, log_var)
 
-        else:
+        elif self.encode_diffraction_pattern:
             concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
             concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
             hidden = self.post_encoder(concat_xrd_loc_atom_spec)
@@ -262,6 +266,11 @@ class CDVAE(BaseModule):
             mu = self.fc_mu(hidden)
             log_var = self.fc_var(hidden)
             z = self.reparameterize(mu, log_var)
+
+        else:
+            mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
+            log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
+            z = xrd_loc
 
         return mu, log_var, z
 
@@ -347,7 +356,7 @@ class CDVAE(BaseModule):
             num_atoms = gt_num_atoms
 
         # obtain atom types.
-        if not self.useoriginal:
+        if self.use_composition_constraint:
             print("not using original")
             atom_types = tsach_atom_types - 1
             atom_types = atom_types.cpu()
@@ -355,7 +364,7 @@ class CDVAE(BaseModule):
 
         composition_per_atom = F.softmax(composition_per_atom, dim=-1)
 
-        if not self.useoriginal:
+        if self.use_composition_constraint:
             composition_per_atom = self.composition_constraint(atom_types, num_atoms, composition_per_atom)
 
         if gt_atom_types is None:
@@ -451,7 +460,7 @@ class CDVAE(BaseModule):
             self.type_sigmas[type_noise_level].repeat_interleave(
                 batch.num_atoms, dim=0))
         
-        if not self.useoriginal:
+        if self.use_composition_constraint:
             atom_types = batch.atom_types - 1 
             num_atoms = batch.num_atoms  # atoms per crystal
             atom_types = atom_types.cpu()
@@ -464,7 +473,7 @@ class CDVAE(BaseModule):
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
 
-        if not self.useoriginal:
+        if self.use_composition_constraint:
             atom_type_probs = self.composition_constraint(atom_types, num_atoms, atom_type_probs)
 
         rand_atom_types = torch.multinomial(
@@ -483,8 +492,8 @@ class CDVAE(BaseModule):
         pred_cart_coord_diff, pred_atom_types = self.decoder(
             z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
         
-        if not self.useoriginal:
-            #get the diffraction pattern from the prediction 
+        
+        if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
             decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
         
         # compute loss.
@@ -502,11 +511,11 @@ class CDVAE(BaseModule):
         else:
             property_loss = 0.
 
-        if self.useoriginal:
-            diffraction_loss = 0.
-        else:
+        if self.use_diffraction_loss:
             #calculate the diffraction loss
             diffraction_loss = self.diffraction_pattern_loss(decoded_xrd_loc, decoded_xrd_int, xrd_loc, xrd_int)
+        else:
+            diffraction_loss = 0.
 
         if self.predict_diffraction_pattern: 
             property_loss = self.diffraction_property_loss(z, xrd_loc, xrd_int)
