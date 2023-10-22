@@ -92,11 +92,6 @@ def run(cfg: DictConfig) -> None:
         cfg.data.datamodule, _recursive_=False
     )
 
-    #print out the use cfg parameter to make sure you're doing things correctly
-    print("cfg.model.use_cond_kld is ", cfg.model.use_cond_kld)
-    #print out the useoriginal parameter to make sure you're doing things correctly
-    print("cfg.model.useoriginal is ", cfg.model.useoriginal)
-
     # Instantiate model
     hydra.utils.log.info(f"Instantiating <{cfg.model._target_}>")
     model: pl.LightningModule = hydra.utils.instantiate(
@@ -104,12 +99,6 @@ def run(cfg: DictConfig) -> None:
         optim=cfg.optim,
         data=cfg.data,
         logging=cfg.logging,
-        use_cond_kld=cfg.model.use_cond_kld,
-        useoriginal=cfg.model.useoriginal,
-        number_of_conditionals = cfg.model.number_of_conditionals,
-        predict_diffraction_pattern = cfg.model.predict_diffraction_pattern,
-        diffraction_encoder_num_layers = cfg.model.diffraction_encoder_num_layers,
-        diffraction_encoder_hidden_dim = cfg.model.diffraction_encoder_hidden_dim,
         _recursive_=False,
     )
 

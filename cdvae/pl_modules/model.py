@@ -144,14 +144,14 @@ class CrystGNN_Supervise(BaseModule):
 
 class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
-        self.use_cond_kld = kwargs.pop("use_cond_kld", False)  
-        self.useoriginal = kwargs.pop("useoriginal", True)
-        self.number_of_conditionals = kwargs.pop("number_of_conditionals", 3)
-        self.predict_diffraction_pattern = kwargs.pop("predict_diffraction_pattern", False)
-        self.diffraction_encoder_num_layers = kwargs.pop("diffraction_encoder_num_layers", 1)
-        self.diffraction_encoder_hidden_dim = kwargs.pop("diffraction_encoder_hidden_dim", 256)
-
         super().__init__(*args, **kwargs)
+
+        self.use_cond_kld = self.hparams.use_cond_kld
+        self.useoriginal = self.hparams.useoriginal
+        self.number_of_conditionals = self.hparams.number_of_conditionals
+        self.predict_diffraction_pattern = self.hparams.predict_diffraction_pattern
+        self.diffraction_encoder_num_layers = self.hparams.diffraction_encoder_num_layers
+        self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
 
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
