@@ -9,6 +9,7 @@ diffraction_encoder_num_layers: 1
 diffraction_encoder_hidden_dim: 256
 use_composition_constraint: false
 use_diffraction_loss: false
+concat_peak_intensities: true
 
 hidden_dim: 256
 latent_dim: 256

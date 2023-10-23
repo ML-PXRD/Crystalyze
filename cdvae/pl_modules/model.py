@@ -157,6 +157,8 @@ class CDVAE(BaseModule):
         self.use_composition_constraint = self.hparams.use_composition_constraint
         self.use_diffraction_loss = self.hparams.use_diffraction_loss
 
+        self.concat_peak_intensities = self.hparams.concat_peak_intensities
+
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
         self.decoder = hydra.utils.instantiate(self.hparams.decoder)
@@ -271,6 +273,13 @@ class CDVAE(BaseModule):
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             z = xrd_loc
+            if self.concat_peak_intensities: 
+                #xrd_loc is 256 x 256
+                #xrd_int is 256 x 256
+                #we want to take the first 128 columns of xrd_loc and the first 128 columns of xrd_int and concatenate them together
+                xrd_loc_sliced = xrd_loc[:, :128]
+                xrd_int_sliced = xrd_int[:, :128]
+                z = torch.cat((xrd_loc_sliced, xrd_int_sliced), dim=1)
 
         return mu, log_var, z
 
