@@ -10,6 +10,7 @@ diffraction_encoder_hidden_dim: 256
 use_composition_constraint: false
 use_diffraction_loss: false
 concat_peak_intensities: true
+concat_elemental_composition: true
 
 hidden_dim: 256
 latent_dim: 256
