@@ -93,7 +93,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                 # print("gt_atom_types: ", gt_atom_types)
                 
                 outputs = model.langevin_dynamics(
-                    z, ld_kwargs, gt_num_atoms, gt_atom_types, tsach_atom_types=batch.atom_types)
+                    z, ld_kwargs, gt_num_atoms, gt_atom_types, atom_spec)
 
                 # collect sampled crystals in this batch.
                 batch_frac_coords.append(outputs['frac_coords'].detach().cpu())

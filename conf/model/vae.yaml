@@ -7,7 +7,7 @@ predict_diffraction_pattern: false
 encode_diffraction_pattern: false
 diffraction_encoder_num_layers: 1
 diffraction_encoder_hidden_dim: 256
-use_composition_constraint: false
+use_composition_constraint: true
 use_diffraction_loss: false
 concat_peak_intensities: true
 concat_elemental_composition: true

@@ -296,7 +296,7 @@ class CDVAE(BaseModule):
         return mu, log_var, z
 
     def decode_stats(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
-                     teacher_forcing=False):
+                     teacher_forcing=False, gt_elements = None):
         """
         decode key stats from latent embeddings.
         batch is input during training for teach-forcing.
@@ -314,44 +314,53 @@ class CDVAE(BaseModule):
             lengths_and_angles, lengths, angles = (
                 self.predict_lattice(z, num_atoms))
             composition_per_atom = self.predict_composition(z, num_atoms)
+
+        if gt_elements is not None: 
+            #impose the composition constraint
+            composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
+
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
     def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
-        """
-        Restrict the probability distribution from which the atom types are randomly drawn 
-        to only include the elements that are present in the crystal.
+            """
+            Restrict the probability distribution from which the atom types are randomly drawn 
+            to only include the elements that are present in the crystal.
 
-        atom_types: the atom types in the crystal
-        num_atoms: the number of atoms in the crystal
-        composition_per_atom: the probability distribution from which the atom types are randomly drawn 
+            atom_types: the atom types in the crystal
+            num_atoms: the number of atoms in the crystal
+            composition_per_atom: the probability distribution from which the atom types are randomly drawn 
 
-        """
+            """
 
-        range_tensor = torch.arange(len(num_atoms))
-        range_tensor = range_tensor.cpu()
+            # Create a range tensor and repeat it as before
+            range_tensor = torch.arange(len(num_atoms), device='cuda:0')
+            crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
 
-        crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
-        unique_crystal_ids = crystal_ids.unique()
-        crystal_to_atom_types = {crystal_id.item(): atom_types[crystal_ids == crystal_id].unique() for crystal_id in unique_crystal_ids}
+            # Convert atom_types into a mask
+            atom_mask = atom_types != 0
 
-        mask = torch.zeros_like(composition_per_atom, dtype=torch.bool)
-        mask = mask.cuda(0)
+            # For each unique crystal_id, get its corresponding indices in composition_per_atom
+            unique_crystal_ids, counts = torch.unique(crystal_ids, return_counts=True)
+            
+            start_idx = 0
+            for u_id, count in zip(unique_crystal_ids, counts):
+                relevant_elements = atom_types[u_id][atom_mask[u_id]]
+                mask = torch.zeros_like(composition_per_atom[start_idx], dtype=torch.bool)
+                mask[relevant_elements-1] = 1
 
-        for i, (atom_type, crystal_id) in enumerate(zip(atom_types, crystal_ids)):
+                # Create additive mask
+                additive_mask_for_normalization = mask * 0.0001
 
-            crystal_id = crystal_id.item()
-            atom_types_in_crystal = crystal_to_atom_types[crystal_id]
-            atom_types_in_crystal = atom_types_in_crystal.to(dtype=torch.long)
-            mask[i, atom_types_in_crystal] = 1
+                # Apply masks to the relevant segment of composition_per_atom
+                composition_per_atom[start_idx:start_idx+count] *= mask
+                composition_per_atom[start_idx:start_idx+count] += additive_mask_for_normalization
 
-        epsilon = 1e-10
-        composition_per_atom = composition_per_atom + epsilon # to avoid dividing by 0 
-        composition_per_atom = composition_per_atom * mask.float()
-
-        return composition_per_atom
+                # Update start index for next iteration
+                start_idx += count
+            return composition_per_atom
 
     @torch.no_grad()
-    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None, tsach_atom_types=None):
+    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None, gt_elements_input=None):
         """
         decode crystral structure from latent embeddings.
         ld_kwargs: args for doing annealed langevin dynamics sampling:
@@ -371,22 +380,16 @@ class CDVAE(BaseModule):
             all_atom_types = []
 
         # obtain key stats.
+        if not self.use_composition_constraint: 
+            gt_elements_input = None
+
         num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats(
-            z, gt_num_atoms)
+            z, gt_num_atoms, gt_elements=gt_elements_input)
+  
         if gt_num_atoms is not None:
             num_atoms = gt_num_atoms
 
-        # obtain atom types.
-        if self.use_composition_constraint:
-            print("not using original")
-            atom_types = tsach_atom_types - 1
-            atom_types = atom_types.cpu()
-            num_atoms = num_atoms.cpu()
-
         composition_per_atom = F.softmax(composition_per_atom, dim=-1)
-
-        if self.use_composition_constraint:
-            composition_per_atom = self.composition_constraint(atom_types, num_atoms, composition_per_atom)
 
         if gt_atom_types is None:
             composition_per_atom = composition_per_atom.cuda(0)
@@ -409,7 +412,7 @@ class CDVAE(BaseModule):
                 noise_cart = torch.randn_like(
                     cur_frac_coords) * torch.sqrt(step_size * 2)
                 pred_cart_coord_diff, pred_atom_types = self.decoder(
-                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles, gt_elements=gt_elements_input)
                 cur_cart_coords = frac_to_cart_coords(
                     cur_frac_coords, lengths, angles, num_atoms)
                 pred_cart_coord_diff = pred_cart_coord_diff / sigma
@@ -463,9 +466,14 @@ class CDVAE(BaseModule):
             prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)   
             kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
 
+        if self.use_composition_constraint: 
+            gt_elements = atom_spec
+        else: 
+            gt_elements = None
+
         (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
         pred_composition_per_atom) = self.decode_stats(
-            z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing)
+            z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing, gt_elements)
 
         # sample noise levels.
         noise_level = torch.randint(0, self.sigmas.size(0),
@@ -480,12 +488,6 @@ class CDVAE(BaseModule):
         used_type_sigmas_per_atom = (
             self.type_sigmas[type_noise_level].repeat_interleave(
                 batch.num_atoms, dim=0))
-        
-        if self.use_composition_constraint:
-            atom_types = batch.atom_types - 1 
-            num_atoms = batch.num_atoms  # atoms per crystal
-            atom_types = atom_types.cpu()
-            num_atoms = num_atoms.cpu()
 
         # add noise to atom types and sample atom types.
         pred_composition_probs = F.softmax(
@@ -493,10 +495,6 @@ class CDVAE(BaseModule):
         atom_type_probs = (
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
-
-        if self.use_composition_constraint:
-            atom_type_probs = self.composition_constraint(atom_types, num_atoms, atom_type_probs)
-
         rand_atom_types = torch.multinomial(
             atom_type_probs, num_samples=1).squeeze(1) + 1
 
@@ -511,8 +509,7 @@ class CDVAE(BaseModule):
             cart_coords, pred_lengths, pred_angles, batch.num_atoms)
 
         pred_cart_coord_diff, pred_atom_types = self.decoder(
-            z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles)
-        
+            z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles, gt_elements)
         
         if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
             decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
@@ -792,7 +789,6 @@ class CDVAE(BaseModule):
         # print("kld_loss: ", kld_loss)
         return kld_loss
     
-
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         teacher_forcing = (
             self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
