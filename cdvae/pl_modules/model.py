@@ -141,7 +141,6 @@ class CrystGNN_Supervise(BaseModule):
             })
         return log_dict, loss
 
-
 class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -156,6 +155,7 @@ class CDVAE(BaseModule):
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
         self.use_composition_constraint = self.hparams.use_composition_constraint
         self.use_diffraction_loss = self.hparams.use_diffraction_loss
+        self.training_with_natoms = self.hparams.training_with_natoms
 
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
@@ -292,6 +292,15 @@ class CDVAE(BaseModule):
                     atom_spec_sliced = atom_spec[:, :20]
 
                     z = torch.cat((xrd_loc_sliced, xrd_int_sliced, atom_spec_sliced), dim=1)
+            else:
+                if self.concat_elemental_composition:
+                    #xrd_loc is 256 x 256
+                    #atom_spec is 256 x 256
+                    #we want to take the first 236 columns of xrd_loc and the first 20 columns of atom_spec and concatenate them together
+                    xrd_loc_sliced = xrd_loc[:, :236]
+                    atom_spec_sliced = atom_spec[:, :20]
+
+                    z = torch.cat((xrd_loc_sliced, atom_spec_sliced), dim=1)
 
         return mu, log_var, z
 
@@ -474,6 +483,7 @@ class CDVAE(BaseModule):
         (pred_num_atoms, pred_lengths_and_angles, pred_lengths, pred_angles,
         pred_composition_per_atom) = self.decode_stats(
             z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing, gt_elements)
+        
 
         # sample noise levels.
         noise_level = torch.randint(0, self.sigmas.size(0),
@@ -516,6 +526,9 @@ class CDVAE(BaseModule):
         
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
+        if self.training_with_natoms:
+            num_atom_loss = num_atom_loss * 0.0
+            
         lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
         composition_loss = self.composition_loss(
             pred_composition_per_atom, batch.atom_types, batch)

@@ -153,7 +153,7 @@ class RecEval(object):
         validity = [c.valid for c in self.preds]
 
         rms_dists = []
-        evaluate_diff_pattern = False
+        evaluate_diff_pattern = args.compare_diffraction_patterns
         if evaluate_diff_pattern:
             diff_dists = []
         for i in tqdm(range(len(self.preds))):
@@ -402,5 +402,6 @@ if __name__ == '__main__':
     parser.add_argument('--root_path', required=True)
     parser.add_argument('--label', default='')
     parser.add_argument('--tasks', nargs='+', default=['recon', 'gen', 'opt'])
+    parser.add_argument('--compare_diffraction_patterns', default=False)
     args = parser.parse_args()
     main(args)

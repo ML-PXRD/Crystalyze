@@ -1,16 +1,17 @@
 _target_: cdvae.pl_modules.model.CDVAE
 
 use_cond_kld: false 
-useoriginal: false
+useoriginal: true
 number_of_conditionals: 3
 predict_diffraction_pattern: false
 encode_diffraction_pattern: false
 diffraction_encoder_num_layers: 1
 diffraction_encoder_hidden_dim: 256
-use_composition_constraint: true
+use_composition_constraint: false
 use_diffraction_loss: false
-concat_peak_intensities: true
-concat_elemental_composition: true
+concat_peak_intensities: false
+concat_elemental_composition: false
+training_with_natoms: false
 
 hidden_dim: 256
 latent_dim: 256
