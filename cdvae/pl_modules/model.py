@@ -155,7 +155,6 @@ class CDVAE(BaseModule):
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
         self.use_composition_constraint = self.hparams.use_composition_constraint
         self.use_diffraction_loss = self.hparams.use_diffraction_loss
-        self.training_with_natoms = self.hparams.training_with_natoms
 
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
@@ -326,8 +325,9 @@ class CDVAE(BaseModule):
 
         if gt_elements is not None: 
             #impose the composition constraint
+            # print('the initial composition_per_atom inside of decode stats is: {}'.format(composition_per_atom[[0]]))
             composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
-
+            # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
     def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
@@ -350,19 +350,25 @@ class CDVAE(BaseModule):
 
             # For each unique crystal_id, get its corresponding indices in composition_per_atom
             unique_crystal_ids, counts = torch.unique(crystal_ids, return_counts=True)
-            
+
+            composition_per_atom = composition_per_atom + 1
+
             start_idx = 0
             for u_id, count in zip(unique_crystal_ids, counts):
                 relevant_elements = atom_types[u_id][atom_mask[u_id]]
-                mask = torch.zeros_like(composition_per_atom[start_idx], dtype=torch.bool)
-                mask[relevant_elements-1] = 1
 
-                # Create additive mask
-                additive_mask_for_normalization = mask * 0.0001
+                #first step: create a hugely negative additive mask 
+                mask = torch.ones_like(composition_per_atom[start_idx])
+                mask *= (-10**6) # creating a matrix like [-10^6, ..., -10^6]
+                mask[relevant_elements-1] = 0 # setting the elements that are present in the crystal to 0
+
+                # second step: create a second additive mask that is used to boost any small scores for the correct elements
+                additive_mask_for_normalization = torch.zeros_like(composition_per_atom[start_idx]) # creating a matrix like [0, ..., 0]
+                additive_mask_for_normalization[relevant_elements-1] = 0.0001 # setting the elements that are present in the crystal to 0.0001
 
                 # Apply masks to the relevant segment of composition_per_atom
-                composition_per_atom[start_idx:start_idx+count] *= mask
-                composition_per_atom[start_idx:start_idx+count] += additive_mask_for_normalization
+                composition_per_atom[start_idx:start_idx+count] += mask # adding the huge negative mask to the relevant segment of composition_per_atom
+                composition_per_atom[start_idx:start_idx+count] += additive_mask_for_normalization # adding the small additive mask to the relevant segment of composition_per_atom
 
                 # Update start index for next iteration
                 start_idx += count
@@ -505,8 +511,17 @@ class CDVAE(BaseModule):
         atom_type_probs = (
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
+        
+        #print out the distribution over which the random atom types are being sampled
+        # print('the distributions over which the random atom types are being sampled is: {}'.format(atom_type_probs[range(0, batch.num_atoms[0].item())]))
+
         rand_atom_types = torch.multinomial(
             atom_type_probs, num_samples=1).squeeze(1) + 1
+
+        #print the true atom types for the first crystal 
+        print('the true atom types for the first crystal are: {}'.format(batch.atom_types[range(0, batch.num_atoms[0].item())]))
+        #print the predicted atom types for the first crystal
+        print('the predicted atom types for the first crystal are: {}'.format(rand_atom_types[range(0, batch.num_atoms[0].item())]))
 
         # add noise to the cart coords
         cart_noises_per_atom = (
@@ -526,8 +541,6 @@ class CDVAE(BaseModule):
         
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
-        if self.training_with_natoms:
-            num_atom_loss = num_atom_loss * 0.0
             
         lattice_loss = self.lattice_loss(pred_lengths_and_angles, batch)
         composition_loss = self.composition_loss(

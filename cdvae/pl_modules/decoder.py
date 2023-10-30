@@ -95,20 +95,29 @@ def composition_constraint(atom_types, num_atoms, composition_per_atom):
 
         # For each unique crystal_id, get its corresponding indices in composition_per_atom
         unique_crystal_ids, counts = torch.unique(crystal_ids, return_counts=True)
-        
+        #print the initial composition
+        # print("the initial composition inside GemNet {}".format(composition_per_atom[[0]]))
+        composition_per_atom = composition_per_atom + 1
+
         start_idx = 0
         for u_id, count in zip(unique_crystal_ids, counts):
             relevant_elements = atom_types[u_id][atom_mask[u_id]]
-            mask = torch.zeros_like(composition_per_atom[start_idx], dtype=torch.bool)
-            mask[relevant_elements-1] = 1
 
-            # Create additive mask
-            additive_mask_for_normalization = mask * 0.0001
+            #first step: create a hugely negative additive mask 
+            mask = torch.ones_like(composition_per_atom[start_idx])
+            mask *= (-10**6) # creating a matrix like [-10^6, ..., -10^6]
+            mask[relevant_elements-1] = 0 # setting the elements that are present in the crystal to 0
+
+            # second step: create a second additive mask that is used to boost any small scores for the correct elements
+            additive_mask_for_normalization = torch.zeros_like(composition_per_atom[start_idx]) # creating a matrix like [0, ..., 0]
+            additive_mask_for_normalization[relevant_elements-1] = 0.0001 # setting the elements that are present in the crystal to 0.0001
 
             # Apply masks to the relevant segment of composition_per_atom
-            composition_per_atom[start_idx:start_idx+count] *= mask
-            composition_per_atom[start_idx:start_idx+count] += additive_mask_for_normalization
+            composition_per_atom[start_idx:start_idx+count] += mask # adding the huge negative mask to the relevant segment of composition_per_atom
+            composition_per_atom[start_idx:start_idx+count] += additive_mask_for_normalization # adding the small additive mask to the relevant segment of composition_per_atom
 
             # Update start index for next iteration
             start_idx += count
+        #print the final result after the mask constraint 
+        # print("the final result after the mask constraint inside GemNet {}".format(composition_per_atom[[0]]))
         return composition_per_atom

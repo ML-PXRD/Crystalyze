@@ -9,9 +9,9 @@ core:
 hydra:
   run:
     dir: ${oc.env:HYDRA_JOBS}/singlerun/${now:%Y-%m-%d}/${expname}/
-
+    
   sweep:
-    dir: ${oc.env:HYDRA_JOBS}/multirun/${now:%Y-%m-%d}/${expname}/
+    dir: /home/gridsan/tmackey/hydra/singlerun/2023-10-28/og_CDVAE_mp_20
     subdir: ${hydra.job.num}_${hydra.job.id}
 
   job:

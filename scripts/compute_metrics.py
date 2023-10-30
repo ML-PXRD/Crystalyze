@@ -144,6 +144,8 @@ class RecEval(object):
                 gt_adjusted_vector[:minimum] = gt_pattern.x[:minimum]
                 
                 #calculate the RMSD between the two patterns
+                print(pred_adjusted_vector)
+                print(gt_adjusted_vector)
                 rms_dist = np.sqrt(np.mean((pred_adjusted_vector - gt_adjusted_vector)**2))
 
                 return rms_dist
