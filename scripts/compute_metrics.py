@@ -15,7 +15,6 @@ from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
 from matminer.featurizers.composition.composite import ElementProperty
-
 #added by Tsach
 
 
@@ -104,9 +103,10 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
+from pymatgen.io.cif import CifWriter
 class RecEval(object):
 
-    def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #modified by Tsach from the original values of stol=0.5, angle_tol=10, ltol=0.3
+    def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #original values of stol=0.5, angle_tol=10, ltol=0.3
         assert len(pred_crys) == len(gt_crys)
         self.matcher = StructureMatcher(
             stol=stol, angle_tol=angle_tol, ltol=ltol)
@@ -121,6 +121,24 @@ class RecEval(object):
                 rms_dist = self.matcher.get_rms_dist(
                     pred.structure, gt.structure)
                 rms_dist = None if rms_dist is None else rms_dist[0]
+                if rms_dist is not None: 
+                    pred_structure = pred.structure
+                    gt_structure = gt.structure
+
+                    pred_formula = pred_structure.formula.replace(" ", "_")  # Replace spaces with underscores
+                    gt_formula = gt_structure.formula.replace(" ", "_")  # Replace spaces with underscores
+
+                    pred_filename = f"{pred_formula}.cif" 
+                    gt_filename = f"{gt_formula}.cif"
+
+                    pred_filepath = os.path.join(args.root_path, pred_filename)
+                    gt_filepath = os.path.join(args.root_path, gt_filename)
+
+                    pred_writer = CifWriter(pred_structure)
+                    gt_writer = CifWriter(gt_structure)
+
+                    pred_writer.write_file(pred_filepath)
+                    gt_writer.write_file(gt_filepath)
                 return rms_dist
             except Exception:
                 return None
