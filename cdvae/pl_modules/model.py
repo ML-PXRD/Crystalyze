@@ -158,6 +158,9 @@ class CDVAE(BaseModule):
 
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
+        self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
+        if self.diffraction_convolution:
+            self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
@@ -274,16 +277,11 @@ class CDVAE(BaseModule):
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             z = xrd_loc
             if self.concat_peak_intensities: 
-                #xrd_loc is 256 x 256
-                #xrd_int is 256 x 256
                 #we want to take the first 128 columns of xrd_loc and the first 128 columns of xrd_int and concatenate them together
                 xrd_loc_sliced = xrd_loc[:, :128]
                 xrd_int_sliced = xrd_int[:, :128]
                 z = torch.cat((xrd_loc_sliced, xrd_int_sliced), dim=1)
                 if self.concat_elemental_composition:
-                    #xrd_loc is 256 x 256
-                    #xrd_int is 256 x 256
-                    #atom_spec is 256 x 256
                     #we want to take the first 118 columns of xrd_loc, the first 118 columns of xrd_int, and the first 20 columns of atom_spec 
                     #and concatenate them together
                     xrd_loc_sliced = xrd_loc[:, :118]
@@ -291,15 +289,43 @@ class CDVAE(BaseModule):
                     atom_spec_sliced = atom_spec[:, :20]
 
                     z = torch.cat((xrd_loc_sliced, xrd_int_sliced, atom_spec_sliced), dim=1)
+
+            elif self.diffraction_convolution:                
+                if self.concat_elemental_composition: 
+                    #first, we want to slice them to get the first 236 columns of xrd_loc and the first 236 columns of xrd_int
+                    xrd_loc_sliced = xrd_loc[:, :236]
+                    xrd_int_sliced = xrd_int[:, :236]
+
+                    print("the shape of the sliced xrd_loc is: {}".format(xrd_loc_sliced.shape))
+                    print("the shape of the sliced xrd_int is: {}".format(xrd_int_sliced.shape))
+                    # we want to stack them to make a 512 x 2 x 236 tensor
+                    input_tensor = torch.stack((xrd_loc_sliced, xrd_int_sliced), dim=1)
+                    print("input_tensor shape is: {}".format(input_tensor.shape))
+                    output_tensor = self.diff_conv(input_tensor)
+                    #print the shape 
+                    print('the shape of the output tensor is: {}'.format(output_tensor.shape))
+                    #the output tensor is 512 x 1 x 256 so we need to reshape it to be 256 x 256
+                    output_tensor_squeezed_sliced = output_tensor.squeeze()
+                    #print the shape
+                    print('the shape of the output tensor squeezed is: {}'.format(output_tensor_squeezed_sliced.shape))
+                    atom_spec_sliced = atom_spec[:, :21]
+                    z = torch.cat((output_tensor_squeezed_sliced, atom_spec_sliced), dim=1)
+                    #print the first row of z
+                    print('the first row of z is: {}'.format(z[[0]]))
+                else:
+                    #since we're not concatenating the elemental composition, we can just use the xrd_loc and xrd_int tensors as is
+                    input_tensor = torch.stack((xrd_loc, xrd_int), dim=1)
+                    output_tensor = self.diff_conv(input_tensor)
+                    #the output tensor is 256 x 1 x 256 so we need to reshape it to be 256 x 256
+                    output_tensor_squeezed = output_tensor.squeeze()
+                    z = output_tensor_squeezed
             else:
                 if self.concat_elemental_composition:
-                    #xrd_loc is 256 x 256
-                    #atom_spec is 256 x 256
                     #we want to take the first 236 columns of xrd_loc and the first 20 columns of atom_spec and concatenate them together
                     xrd_loc_sliced = xrd_loc[:, :236]
                     atom_spec_sliced = atom_spec[:, :20]
 
-                    z = torch.cat((xrd_loc_sliced, atom_spec_sliced), dim=1)
+                    z = torch.cat((xrd_loc_sliced, atom_spec_sliced), dim=1) 
 
         return mu, log_var, z
 

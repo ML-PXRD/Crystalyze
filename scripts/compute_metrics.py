@@ -128,8 +128,8 @@ class RecEval(object):
                     pred_formula = pred_structure.formula.replace(" ", "_")  # Replace spaces with underscores
                     gt_formula = gt_structure.formula.replace(" ", "_")  # Replace spaces with underscores
 
-                    pred_filename = f"{pred_formula}.cif" 
-                    gt_filename = f"{gt_formula}.cif"
+                    pred_filename = f"pred_{pred_formula}.cif" 
+                    gt_filename = f"gt_{gt_formula}.cif"
 
                     pred_filepath = os.path.join(args.root_path, pred_filename)
                     gt_filepath = os.path.join(args.root_path, gt_filename)

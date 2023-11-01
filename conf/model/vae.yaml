@@ -11,6 +11,7 @@ use_composition_constraint: false
 use_diffraction_loss: false
 concat_peak_intensities: false
 concat_elemental_composition: false
+diffraction_convolution: false
 
 hidden_dim: 256
 latent_dim: 256
