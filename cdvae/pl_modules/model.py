@@ -498,6 +498,7 @@ class CDVAE(BaseModule):
         xrd_int = batch_reserve[1]
         xrd_loc = batch_reserve[2]
         atom_spec = batch_reserve[3]
+        disc_sim_xrd = batch_reserve[4]
         batch = batch[0]
 
         mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)

@@ -103,10 +103,11 @@ class CrystDataModule(pl.LightningDataModule):
         pxrd_locations_list = [item[1] for item in batch]
         pxrd_intensities_list = [item[2] for item in batch]
         atomic_species_list = [item[3] for item in batch]
+        disc_sim_xrd = [item[4] for item in batch]
 
         batched_data = Batch.from_data_list(data_list)
 
-        return batched_data, pxrd_locations_list, pxrd_intensities_list, atomic_species_list
+        return batched_data, pxrd_locations_list, pxrd_intensities_list, atomic_species_list, disc_sim_xrd
 
 
     def train_dataloader(self) -> DataLoader:

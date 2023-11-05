@@ -673,12 +673,21 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     def process_one(row, niggli, primitive, graph_method, prop_list):
         crystal_str = row['cif']
 
-        extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers']
+        extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers', 'disc_sim_xrd']
         extra_feature_data = []
 
         for feature in extra_feature_names:
-            #use ast to convert string to list
-            feature_val_rough = ast.literal_eval(row[feature])
+            
+            #some extra processing for disc_sim_xrd
+            if feature == 'disc_sim_xrd':
+                s = row[feature][1:-1]
+
+                # Split the string based on spaces
+                row[feature] = [float(val) for val in s.split() if val]
+            else:
+
+                #use ast to convert string to list
+                feature_val_rough = ast.literal_eval(row[feature])
 
             #if the feature is atomic_numbers, get only the unique values and randomize
             if feature == 'atomic_numbers':
@@ -708,6 +717,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
             'xrd_intensities': extra_feature_data[0],
             'xrd_locations': extra_feature_data[1],
             'atomic_species': extra_feature_data[2],
+            'disc_sim_xrd': extra_feature_data[3],
         }
         # print(result_dict)
         result_dict.update(properties)
