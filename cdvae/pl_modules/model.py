@@ -159,6 +159,7 @@ class CDVAE(BaseModule):
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
+        self.discrete_simulated_xrd = getattr(self.hparams, 'discrete_simulated_xrd', False)
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
@@ -253,7 +254,7 @@ class CDVAE(BaseModule):
         z = self.reparameterize(mu, log_var)
         return mu, log_var, z
     
-    def encode(self, batch, xrd_int, xrd_loc, atom_spec):
+    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None):
         """
         encode crystal structures to latents.
         """
@@ -276,7 +277,18 @@ class CDVAE(BaseModule):
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             z = xrd_loc
-            if self.concat_peak_intensities: 
+
+            if self.discrete_simulated_xrd: 
+                #we are going to use the first 200 columns of the discrete_simulated_xrd + 56 columns of atom_spec as the encoding
+                #the discrete_simulated_xrd is 256 x 256
+                discrete_simulated_xrd_sliced = discrete_simulated_xrd[:, :200]
+                atom_spec_sliced = atom_spec[:, :56]
+                concat_discrete_simulated_xrd_atom_spec = torch.cat((discrete_simulated_xrd_sliced, atom_spec_sliced), dim=1)
+                #make it a tensor of floats
+                concat_discrete_simulated_xrd_atom_spec = concat_discrete_simulated_xrd_atom_spec.float()
+                z = concat_discrete_simulated_xrd_atom_spec
+
+            elif self.concat_peak_intensities: 
                 #we want to take the first 128 columns of xrd_loc and the first 128 columns of xrd_int and concatenate them together
                 xrd_loc_sliced = xrd_loc[:, :128]
                 xrd_int_sliced = xrd_int[:, :128]
@@ -501,7 +513,7 @@ class CDVAE(BaseModule):
         disc_sim_xrd = batch_reserve[4]
         batch = batch[0]
 
-        mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec)
+        mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd)
         kld_loss = self.kld_loss(mu, log_var)
 
         if self.use_cond_kld:

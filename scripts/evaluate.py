@@ -17,7 +17,9 @@ def new_dataloader_batch_processor(batch):
     xrd_loc = batch_reserve[2]
     atom_spec = batch_reserve[3]
     batch = batch[0]
-    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch
+    disc_sim_xrd = batch_reserve[4]
+
+    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd
 
 def reconstructon(loader, model, ld_kwargs, num_evals,
                   force_num_atoms=False, force_atom_types=False, down_sample_traj_step=1, num_batches=15):
@@ -35,12 +37,13 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
     for idx, batch in enumerate(loader):
         if idx < num_batches:
-            batch_reserve, xrd_int, xrd_loc, atom_spec, batch = new_dataloader_batch_processor(batch)
+            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd = new_dataloader_batch_processor(batch)
 
             #put everything on the gpu
             xrd_int = xrd_int.cuda()
             xrd_loc = xrd_loc.cuda()
             atom_spec = atom_spec.cuda()
+            disc_sim_xrd = disc_sim_xrd.cuda()
             batch = batch.cuda()
 
             print(idx)
@@ -55,7 +58,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch_lengths, batch_angles = [], []
 
             # only sample one z, multiple evals for stoichaticity in langevin dynamics
-            _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
+            
             #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
             #do you wanna do optimization?
@@ -76,10 +79,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                     if i % interval == 0 or i == (num_gradient_steps-1):
                         print("loss: ", loss)
 
-            #this edit is just in optimization
-
             for eval_idx in range(num_evals):
-                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec)
+                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd)
                 # set force atom types to be true 
                 force_num_atoms = True
                 
