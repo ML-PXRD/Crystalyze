@@ -225,3 +225,6 @@ output/
 
 #data folder
 data/
+
+#LLM data in scripts 
+scripts/LLM_data/
