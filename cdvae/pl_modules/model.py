@@ -160,6 +160,7 @@ class CDVAE(BaseModule):
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
         self.discrete_simulated_xrd = getattr(self.hparams, 'discrete_simulated_xrd', False)
+        self.type_fixing = getattr(self.hparams, 'type_fixing', False)
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
@@ -572,7 +573,13 @@ class CDVAE(BaseModule):
         noisy_frac_coords = cart_to_frac_coords(
             cart_coords, pred_lengths, pred_angles, batch.num_atoms)
 
-        pred_cart_coord_diff, pred_atom_types = self.decoder(
+        #print whether or not the model is using type fixing
+        print('the model is using type fixing: {}'.format(self.type_fixing))
+        if self.type_fixing: 
+            pred_cart_coord_diff, pred_atom_types = self.decoder(
+            z, noisy_frac_coords, batch.atom_types, batch.num_atoms, pred_lengths, pred_angles, gt_elements)
+        else: 
+            pred_cart_coord_diff, pred_atom_types = self.decoder(
             z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles, gt_elements)
         
         if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
