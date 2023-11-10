@@ -80,7 +80,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                         print("loss: ", loss)
 
             for eval_idx in range(num_evals):
-                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd)
+                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True)
                 # set force atom types to be true 
                 force_num_atoms = True
                 

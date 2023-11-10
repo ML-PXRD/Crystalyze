@@ -161,6 +161,7 @@ class CDVAE(BaseModule):
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
         self.discrete_simulated_xrd = getattr(self.hparams, 'discrete_simulated_xrd', False)
         self.type_fixing = getattr(self.hparams, 'type_fixing', False)
+        self.dropout_rate = getattr(self.hparams, 'dropout_rate', 0.0)
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
@@ -255,7 +256,7 @@ class CDVAE(BaseModule):
         z = self.reparameterize(mu, log_var)
         return mu, log_var, z
     
-    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None):
+    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False):
         """
         encode crystal structures to latents.
         """
@@ -339,6 +340,11 @@ class CDVAE(BaseModule):
                     atom_spec_sliced = atom_spec[:, :20]
 
                     z = torch.cat((xrd_loc_sliced, atom_spec_sliced), dim=1) 
+        
+        if self.dropout_rate > 0.0 and not testing:
+            z = F.dropout(z, p=self.dropout_rate, training=self.training)
+        else:
+            print("dropout is not being used")
 
         return mu, log_var, z
 

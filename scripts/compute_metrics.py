@@ -104,6 +104,7 @@ from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
 from pymatgen.io.cif import CifWriter
+import pandas as pd
 class RecEval(object):
 
     def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #original values of stol=0.5, angle_tol=10, ltol=0.3
@@ -112,6 +113,7 @@ class RecEval(object):
             stol=stol, angle_tol=angle_tol, ltol=ltol)
         self.preds = pred_crys
         self.gts = gt_crys
+        self.results_df = pd.DataFrame(columns=['pred_formula', 'gt_formula', 'pred_structure', 'gt_structure', 'rmsd'])
 
     def get_match_rate_and_rms(self):
         def process_one(pred, gt, is_valid):
@@ -179,6 +181,14 @@ class RecEval(object):
         for i in tqdm(range(len(self.preds))):
             rms_dists.append(process_one(
                 self.preds[i], self.gts[i], validity[i]))
+            
+            #add to the results dataframe
+            #get the formula names from the structure attribute 
+            pred_formula = self.preds[i].structure.composition.reduced_formula # Replace spaces with underscores
+            gt_formula = self.gts[i].structure.composition.reduced_formula  # Replace spaces with underscores
+            #add the row to the dataframe
+            self.results_df.loc[i] = [pred_formula, gt_formula, self.preds[i].structure, self.gts[i].structure, rms_dists[i]]
+            
             if evaluate_diff_pattern:
                 diff_dists.append(process_diff_pattern(self.preds[i], self.gts[i], validity[i]))
         rms_dists = np.array(rms_dists)
@@ -197,8 +207,7 @@ class RecEval(object):
                 'diff_dist': average_diff_dist}
 
     def get_metrics(self):
-        return self.get_match_rate_and_rms()
-
+        return self.get_match_rate_and_rms(), self.results_df
 
 class GenEval(object):
 
@@ -365,7 +374,9 @@ def main(args):
         gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list)
 
         rec_evaluator = RecEval(pred_crys, gt_crys)
-        recon_metrics = rec_evaluator.get_metrics()
+        recon_metrics, results_df = rec_evaluator.get_metrics()
+        #save the results dataframe
+        results_df.to_csv(os.path.join(args.root_path, "results_df.csv"))
         all_metrics.update(recon_metrics)
 
     if 'gen' in args.tasks:
