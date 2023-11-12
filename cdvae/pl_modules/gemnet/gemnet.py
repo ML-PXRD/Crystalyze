@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch_scatter import scatter
 from torch_sparse import SparseTensor
+from torch.nn import functional 
 
 from cdvae.common.data_utils import (
     get_pbc_distances, radius_graph_pbc, frac_to_cart_coords)
@@ -497,7 +498,7 @@ class GemNetT(torch.nn.Module):
         )
 
     def forward(self, z, frac_coords, atom_types, num_atoms, lengths, angles,
-                edge_index, to_jimages, num_bonds):
+                edge_index, to_jimages, num_bonds, dropout_rate = 0, training = False):
         """
         args:
             z: (N_cryst, num_latent)

@@ -162,6 +162,7 @@ class CDVAE(BaseModule):
         self.discrete_simulated_xrd = getattr(self.hparams, 'discrete_simulated_xrd', False)
         self.type_fixing = getattr(self.hparams, 'type_fixing', False)
         self.dropout_rate = getattr(self.hparams, 'dropout_rate', 0.0)
+        self.decoder_dropout = getattr(self.hparams, 'decoder_dropout', 0.0)
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
@@ -581,12 +582,19 @@ class CDVAE(BaseModule):
 
         #print whether or not the model is using type fixing
         print('the model is using type fixing: {}'.format(self.type_fixing))
+
+        if self.decoder_dropout > 0.0:
+            print("using decoder dropout")
+            z = F.dropout(z, p=self.decoder_dropout, training=self.training)
+
         if self.type_fixing: 
             pred_cart_coord_diff, pred_atom_types = self.decoder(
-            z, noisy_frac_coords, batch.atom_types, batch.num_atoms, pred_lengths, pred_angles, gt_elements)
+            z, noisy_frac_coords, batch.atom_types, batch.num_atoms, 
+            pred_lengths, pred_angles, gt_elements, dropout = self.decoder_dropout, is_training = True)
         else: 
             pred_cart_coord_diff, pred_atom_types = self.decoder(
-            z, noisy_frac_coords, rand_atom_types, batch.num_atoms, pred_lengths, pred_angles, gt_elements)
+            z, noisy_frac_coords, rand_atom_types, batch.num_atoms, 
+            pred_lengths, pred_angles, gt_elements, dropout = self.decoder_dropout, is_training = True)
         
         if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
             decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)

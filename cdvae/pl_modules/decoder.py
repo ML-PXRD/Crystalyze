@@ -43,7 +43,7 @@ class GemNetTDecoder(nn.Module):
         self.fc_atom = nn.Linear(hidden_dim, MAX_ATOMIC_NUM)
 
     def forward(self, z, pred_frac_coords, pred_atom_types, num_atoms,
-                lengths, angles, gt_elements = None):
+                lengths, angles, gt_elements = None, dropout = 0, is_training = False):
         """
         args:
             z: (N_cryst, num_latent)
@@ -67,6 +67,8 @@ class GemNetTDecoder(nn.Module):
             edge_index=None,
             to_jimages=None,
             num_bonds=None,
+            dropout_rate = dropout, 
+            training = is_training
         )
         pred_atom_types = self.fc_atom(h)
         if gt_elements is not None: 
