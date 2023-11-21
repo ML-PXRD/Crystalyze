@@ -15,9 +15,8 @@ from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
 from matminer.featurizers.composition.composite import ElementProperty
+
 #added by Tsach
-
-
 from eval_utils import (
     smact_validity, structure_validity, CompScaler, get_fp_pdist,
     load_config, load_data, get_crystals_list, prop_model_eval, compute_cov)
