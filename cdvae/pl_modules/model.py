@@ -159,7 +159,7 @@ class CDVAE(BaseModule):
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
-        self.discrete_simulated_xrd = getattr(self.hparams, 'discrete_simulated_xrd', False)
+        self.use_discrete_simulated_xrd = getattr(self.hparams, 'use_discrete_simulated_xrd', False)
         self.type_fixing = getattr(self.hparams, 'type_fixing', False)
         self.dropout_rate = getattr(self.hparams, 'dropout_rate', 0.0)
         self.decoder_dropout = getattr(self.hparams, 'decoder_dropout', 0.0)
@@ -281,12 +281,21 @@ class CDVAE(BaseModule):
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
             z = xrd_loc
 
-            if self.discrete_simulated_xrd: 
+            if self.use_discrete_simulated_xrd: 
+                print("using discrete simulated xrd")
                 #we are going to use the first 200 columns of the discrete_simulated_xrd + 56 columns of atom_spec as the encoding
                 #the discrete_simulated_xrd is 256 x 256
                 discrete_simulated_xrd_sliced = discrete_simulated_xrd[:, :200]
-                atom_spec_sliced = atom_spec[:, :56]
-                concat_discrete_simulated_xrd_atom_spec = torch.cat((discrete_simulated_xrd_sliced, atom_spec_sliced), dim=1)
+                #check if we are usuign the elemental composition
+                if self.concat_elemental_composition:
+                    print("using elemental composition")
+                    atom_spec_sliced = atom_spec[:, :56]
+                    concat_discrete_simulated_xrd_atom_spec = torch.cat((discrete_simulated_xrd_sliced, atom_spec_sliced), dim=1)
+                else:
+                    print("not using elemental composition")
+                    #use 56 zeros as the atom_spec
+                    atom_spec_sliced = torch.zeros((atom_spec.shape[0], 56), device=atom_spec.device)
+                    concat_discrete_simulated_xrd_atom_spec = torch.cat((discrete_simulated_xrd_sliced, atom_spec_sliced), dim=1)
                 #make it a tensor of floats
                 concat_discrete_simulated_xrd_atom_spec = concat_discrete_simulated_xrd_atom_spec.float()
                 z = concat_discrete_simulated_xrd_atom_spec
@@ -347,6 +356,9 @@ class CDVAE(BaseModule):
         else:
             print("dropout is not being used")
 
+        print("z is of shape: {}".format(z.shape))
+        print("z is {}".format(z))
+        
         return mu, log_var, z
 
     def decode_stats(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
@@ -519,6 +531,7 @@ class CDVAE(BaseModule):
         xrd_loc = batch_reserve[2]
         atom_spec = batch_reserve[3]
         disc_sim_xrd = batch_reserve[4]
+        # print("the disc sim xrd is: {}".format(disc_sim_xrd))
         batch = batch[0]
 
         mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd)

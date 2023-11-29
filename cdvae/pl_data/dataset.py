@@ -73,11 +73,11 @@ class CrystDataset(Dataset):
             num_nodes=num_atoms,  # special attribute used for batching in pytorch geometric
             y=prop.view(1, -1),
         )
-        print(data)
-        print(xrd_intensities)
-        print(xrd_locations)
-        print(atomic_species)
-        print(disc_sim_xrd)
+        # print(data)
+        # print(xrd_intensities)
+        # print(xrd_locations)
+        # print(atomic_species)
+        # print(disc_sim_xrd)
         return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd
 
     def __repr__(self) -> str:

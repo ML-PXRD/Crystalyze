@@ -684,6 +684,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
                 # Split the string based on spaces
                 row[feature] = [float(val) for val in s.split() if val]
+                feature_val_rough = row[feature]
             else:
 
                 #use ast to convert string to list
@@ -705,7 +706,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
             #create tensors for everything 
             feature_tensor = torch.tensor(feature_val_refined)
             extra_feature_data.append(feature_tensor)
-
+        # print(extra_feature_data)
         crystal = build_crystal(
             crystal_str, niggli=niggli, primitive=primitive)
         graph_arrays = build_crystal_graph(crystal, graph_method)

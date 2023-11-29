@@ -9,13 +9,13 @@ diffraction_encoder_num_layers: 1
 diffraction_encoder_hidden_dim: 256
 use_composition_constraint: true
 use_diffraction_loss: false
-concat_peak_intensities: true
-concat_elemental_composition: false
+concat_peak_intensities: false
+concat_elemental_composition: true
 diffraction_convolution: false
-discrete_simulated_xrd: false
-type_fixing: true
+use_discrete_simulated_xrd: true
+type_fixing: false
 dropout_rate: 0
-decoder_dropout: 0.20
+decoder_dropout: 0
 
 hidden_dim: 256
 latent_dim: 256
