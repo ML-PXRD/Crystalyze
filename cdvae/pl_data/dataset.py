@@ -16,7 +16,7 @@ class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
                  prop: ValueNode, niggli: ValueNode, primitive: ValueNode,
                  graph_method: ValueNode, preprocess_workers: ValueNode,
-                 lattice_scale_method: ValueNode,
+                 lattice_scale_method: ValueNode, 
                  **kwargs):
         super().__init__()
         self.path = path
@@ -141,6 +141,7 @@ def main(cfg: omegaconf.DictConfig):
     dataset: CrystDataset = hydra.utils.instantiate(
         cfg.data.datamodule.datasets.train, _recursive_=False
     )
+
     lattice_scaler = get_scaler_from_data_list(
         dataset.cached_data,
         key='scaled_lattice')
