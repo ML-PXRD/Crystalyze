@@ -142,8 +142,7 @@ def collect_recip_latt_points(cell_matrix, q_max):
 	hkl_pts = get_points_in_sphere(recip_latt, max_h, max_k, max_l)
 	recip_pts = torch.mm(hkl_pts, recip_latt)
 	recip_lengths = torch.linalg.vector_norm(recip_pts, dim = 1)
-	squared_recip_lengths = torch.square(recip_lengths)
-	return hkl_pts, squared_recip_lengths
+	return hkl_pts, recip_lengths
 
 
 def get_points_in_sphere(recip_latt, max_h, max_k, max_l):
@@ -154,138 +153,86 @@ def get_points_in_sphere(recip_latt, max_h, max_k, max_l):
 	return hkl_pts
 
 
-def get_zs_fcoords_coeffs(structure):
-	zs = torch.tensor(structure[3], requires_grad = True)
+def get_fcoords_occus_zs_coeffs(structure):
 	fcoords = torch.tensor(structure[2], requires_grad = True)
-	coeffs = torch.ones((2, 4, 4, 2))
-	#coeffs = torch.ones((#of sites, #of unique elements, 4, 2))
-	return zs, fcoords, coeffs
+	occus = torch.tensor(structure[3], requires_grad = True)
+	zs = torch.tensor(structure[4])
+	coeffs = torch.ones((2, 4, 2))
+	#coeffs = torch.ones((#of unique elements, 4, 2))
+	return fcoords, occus, zs, coeffs
 
 
-def calc_atomic_scattering_factor(zs, squared_recip_lengths, coeffs):
-	#Add additional dimension to the r list for each hkl
-	squared_recip_lengths_plus = squared_recip_lengths.unsqueeze(0)
+def calc_atomic_scattering_factor(zs, recip_lengths, coeffs):
+	#Add additional dimension to the r^2 list for each hkl
+	squared_recip_lengths = torch.square(recip_lengths).unsqueeze(0)
 
 	# Calculate the exponentiated component of the fitted atomic scattering factor
-	extinct_exp = torch.exp(torch.matmul(-coeffs[:, :, :, 1].unsqueeze(3), squared_recip_lengths_plus))
+	extinct_exp = torch.exp(-coeffs[:, :, 1].unsqueeze(2) * squared_recip_lengths)
 
 	# Calculate the whole of the fitted atomic scattering factor function
-	fitted_factor = torch.sum(torch.mul(coeffs[:, :, :, 0].unsqueeze(3), extinct_exp), axis = 2)
+	fitted_factor = torch.sum(coeffs[:, :, 0].unsqueeze(2) * extinct_exp, axis = 1)
 
 	# Calculate the full angle dependent component of the atomic scattering factor
-	angle_fs = 41.78214 * squared_recip_lengths_plus * fitted_factor
+	angle_fs = 41.78214 * squared_recip_lengths * fitted_factor
 
 	# Calculate the atomic scattering factor for each hkl
-	fs = zs.unsqueeze(2) - angle_fs
+	fs = zs.unsqueeze(1) - angle_fs
 
 	return fs
 
+def calc_lorentz_factor(recip_lengths, wavelength):
+	# Calculate a theta list from r's
+	theta = torch.asin(wavelength * recip_lengths / 2)
 
-def dif_diffraction_calc(lengths, angles, atoms, wavelength = 1.54184, scaled = True, two_theta_range=(0, 90), hex_angle_tol = 0.01, debye_waller_factors=None, two_theta_tol = 1e-4, INTENSITY_TOL = 1e-4):
-	peaks_ti = torch.tensor([[0,0]])
-	two_thetas = torch.tensor(0).reshape(1)
+	# Calculate how the intensity of peaks are expected to tail off due to geometric constraints of experiments
+	lorentz_factor = (1 + torch.square(torch.cos(2 * theta))) / (torch.square(torch.sin(theta)) * torch.cos(theta))
 
+	"""Another way to calculate it is
+	x = wavelength * recip_lengths / 2
+	lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
+	"""
 
-	for hkl, g_hkl in sorted(recip_pts, key=lambda i: (i[1], -i[0][0], -i[0][1], -i[0][2])):
-		hkl = torch.tensor([hkl], dtype = torch.float)
-		if g_hkl != 0:
-			# Bragg condition
-			theta = torch.asin(wavelength * g_hkl / 2)
-
-
-
-			# s = sin(theta) / wavelength = 1 / 2d = |ghkl| / 2 (d =
-			# 1/|ghkl|)
-			s = g_hkl / 2
-
-			# Store s^2 since we are using it a few times.
-			s2 = s**2
-
-			# Vectorized computation of g.r for all fractional coords and
-			# hkl.
-			g_dot_r = torch.tensordot(fcoords, torch.transpose(hkl,0,1), dims = 1).T[0]
+	return lorentz_factor
 
 
-			# Highly vectorized computation of atomic scattering factors.
-			# Equivalent non-vectorized code is::
-			#
-			#   for site in structure:
-			#	  el = site.specie
-			#	  coeff = ATOMIC_SCATTERING_PARAMS[el.symbol]
-			#	  fs = el.Z - 41.78214 * s2 * sum(
-			#		  [d[0] * exp(-d[1] * s2) for d in coeff])
-			fs = zs - 41.78214 * squared * torch.sum(
-				coeffs[:, :, 0] * torch.exp(-coeffs[:, :, 1] * s2),
-				axis=1,  # type: ignore
-			)
 
-			# Structure factor = sum of atomic scattering factors (with
-			# position factor exp(2j * pi * g.r and occupancies).
-			# Vectorized computation.
-			f_hkl = torch.sum(fs * torch.exp(2j * pi * g_dot_r) * dw_correction)
-
-			# Lorentz polarization correction for hkl
-			lorentz_factor = (1 + torch.cos(2 * theta) ** 2) / (torch.sin(theta) ** 2 * torch.cos(theta))
-
-			# Intensity for hkl is modulus square of structure factor.
-			i_hkl = (f_hkl * torch.conj(f_hkl)).real
-
-			two_theta = (2 * theta * 180 / pi).reshape(1)
-
-			# Deal with floating point precision issues. This combines all peaks within two_theta_tol
-			ind = torch.where(
-				torch.abs(torch.subtract(peaks_ti[:,0], two_theta)) < two_theta_tol
-			)
-
-			# Add intensity to an existing peak if there is already a peak with the same two theta
-			if len(ind[0]) > 0:
-				peaks_ti[ind[0][0]][1] += i_hkl * lorentz_factor
-
-			# Add a new peak to the peak tensor
-			else:
-				d_hkl = 1 / g_hkl
-				peak_intensity = (i_hkl * lorentz_factor).reshape(1)
-				peak = torch.cat((two_theta,peak_intensity)).reshape(1,2)
-				peaks_ti = torch.cat((peaks_ti,peak))
-				two_thetas = torch.cat((two_thetas,two_theta))
-
-
-	# Scale the diffraction peak intensities
-	max_intensity = torch.tensor([1,torch.max(peaks_ti[:,1]) / 100])
-	peaks_ti = peaks_ti / max_intensity
-	print(peaks_ti)
-	peaks_ti[2][0].backward()
-	return [peaks_ti[2][0], angles.grad, lengths.grad]
-
-
-def diffraction_calc(structure, q_max):
+def diffraction_calc(structure, q_max, wavelength = 1.54184):
 	#default q_max should be 4 * pi / wavelength
 	# Calculate the cell matrix
 	cell_matrix = get_cell_matrix(structure)
 
 	# Get all the hkl points that satisfy the chosen q_max and put them in a list
 	# Also put the r of the lattice point in a different list
-	hkl_pts, squared_recip_lengths = collect_recip_latt_points(cell_matrix, q_max)
+	hkl_pts, recip_lengths = collect_recip_latt_points(cell_matrix, q_max)
 
 	# Collect all the information on the atoms
-	zs, fcoords, coeffs = get_zs_fcoords_coeffs(structure)
+	fcoords, occus, zs, coeffs = get_fcoords_occus_zs_coeffs(structure)
 
 	# Calculate the atom positions times each set of hkl indices
 	g_dot_r = torch.mm(hkl_pts, fcoords.T)
 
 	# Calculate the atomic scattering factors at each r (or angle)
-	fs = calc_atomic_scattering_factor(zs, squared_recip_lengths, coeffs)
-	print(fs.size())
-	print(torch.exp(2j * pi * g_dot_r).size())
+	fs = calc_atomic_scattering_factor(zs, recip_lengths, coeffs)
+
+	# Multiply the atomic scattering factors by the occupation of each site
+	w_fs = torch.mm(occus, fs)
 
 	# Calculate the complex phase and intensity of the scattering for each hkl
-	f_hkl = torch.sum(fs * torch.exp(2j * pi * g_dot_r))
+	f_hkl = torch.sum(w_fs.T * torch.exp(2j * pi * g_dot_r), axis = 1)
 
 	# Calculate the real instensity for each hkl
 	i_hkl = (f_hkl * torch.conj(f_hkl)).real
 
-	# Calculate how the intensity of peaks are expected to tail off due to geometric constraints of experiments
-	lorentz_factor = (1 + torch.cos(2 * theta) ** 2) / (torch.sin(theta) ** 2 * torch.cos(theta))
+	# Calculate the lorentz factor based on the recip lengths
+	lorentz_factor = calc_lorentz_factor(recip_lengths, wavelength)
+
+	# Calculate two theta values from recip lengths
+	two_thetas = 2 * torch.asin(wavelength * recip_lengths / 2)
+
+	#Calculate intensities from i_hkl and correction factor (lorentz_factor)
+	intensities = i_hkl * lorentz_factor
+
+	pattern = torch.stack((two_thetas, intensities))
 
 	return pattern
 
@@ -298,16 +245,17 @@ def diffraction_loss(structure_gen, structure_ref, q_max = 8):
 
 angles_ref = [90.0,90.0,90.0]
 lengths_ref = [4.0,4.0,4.0]
-atom_positions_ref = [[0,0,0],[.5,.5,.5]]
-atom_types_ref = [[0.25,0,0.5,0.25],[0.25,0,0.5,0.25]]
+atom_positions_ref = [[0,0,0],[.5,.5,.5],[0.75,0.75,0.75]]
+atom_types_ref = [[0.25,0.75],[0.25,0.75],[0.5,0.5]]
+zs_ref = [1,2]
 
 angles_gen = [90.0,90.0,90.0]
 lengths_gen = [4.0,4.0,4.0]
 atom_positions_gen = [[0,0,0],[0.5,0.5,0.49]]
-atom_types_gen = [[0.25,0,0.5,0.25],[0.25,0,0.5,0.25]]
+atom_types_gen = [[0.25,0.75],[0.25,0.75]]
+zs_gen = [1,2]
 
-structure_ref = [angles_ref, lengths_ref, atom_positions_ref, atom_types_ref]
-structure_gen = [angles_gen, lengths_gen, atom_positions_gen, atom_types_gen]
+structure_ref = [angles_ref, lengths_ref, atom_positions_ref, atom_types_ref, zs_ref]
+structure_gen = [angles_gen, lengths_gen, atom_positions_gen, atom_types_gen, zs_gen]
 
 diffraction_loss(structure_gen, structure_ref)
-dif_diffraction_calc(lengths, angles, atoms, wavelength = 1.54184, scaled = True, two_theta_range=(0, 90), hex_angle_tol = 0.01, debye_waller_factors=None)
