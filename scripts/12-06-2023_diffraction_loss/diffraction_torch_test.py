@@ -187,7 +187,7 @@ def calc_lorentz_factor(recip_lengths, wavelength):
 	# Calculate how the intensity of peaks are expected to tail off due to geometric constraints of experiments
 	lorentz_factor = (1 + torch.square(torch.cos(2 * theta))) / (torch.square(torch.sin(theta)) * torch.cos(theta))
 
-	"""Another way to calculate it is
+	"""Another way to calculate it without trig functions is
 	x = wavelength * recip_lengths / 2
 	lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
 	"""
