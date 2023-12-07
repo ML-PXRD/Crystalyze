@@ -667,8 +667,16 @@ def get_scaler_from_data_list(data_list, key):
 
 
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
+               train_fraction, 
                prop_list):
     df = pd.read_csv(input_file)
+    n = len(df)*train_fraction
+    #round n
+    n = round(n)
+
+    #sample n rows from the dataframe
+    df = df.sample(n=n)
+    print("using {} rows given a train_fraction of {}".format(n, train_fraction))
 
     def process_one(row, niggli, primitive, graph_method, prop_list):
         crystal_str = row['cif']

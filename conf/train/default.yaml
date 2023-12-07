@@ -15,7 +15,7 @@ pl_trainer:
   gradient_clip_val: 0.5
   gradient_clip_algorithm: value
   profiler: simple
-  #limit_train_batches: 1.0
+
 
 monitor_metric: 'val_loss'
 monitor_metric_mode: 'min'

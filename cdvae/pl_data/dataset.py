@@ -17,6 +17,7 @@ class CrystDataset(Dataset):
                  prop: ValueNode, niggli: ValueNode, primitive: ValueNode,
                  graph_method: ValueNode, preprocess_workers: ValueNode,
                  lattice_scale_method: ValueNode, 
+                 train_fraction: ValueNode = 1,
                  **kwargs):
         super().__init__()
         self.path = path
@@ -27,6 +28,7 @@ class CrystDataset(Dataset):
         self.primitive = primitive
         self.graph_method = graph_method
         self.lattice_scale_method = lattice_scale_method
+        self.train_fraction = train_fraction
 
         self.cached_data = preprocess(
             self.path,
@@ -34,6 +36,7 @@ class CrystDataset(Dataset):
             niggli=self.niggli,
             primitive=self.primitive,
             graph_method=self.graph_method,
+            train_fraction=self.train_fraction,
             prop_list=[prop])
 
         add_scaled_lattice_prop(self.cached_data, lattice_scale_method)
