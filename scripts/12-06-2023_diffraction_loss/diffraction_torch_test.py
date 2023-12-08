@@ -148,10 +148,13 @@ def collect_recip_latt_points(cell_matrix, q_max):
 def get_points_in_sphere(recip_latt, max_h, max_k, max_l):
 	# TODO: Only do calculation for peaks that are within radius r of sphere
 	# Right now, this calculates for peaks that are within rectangular prism that circumscribes sphere
+	# Make a matrix the size of the reciprocal lattice
 	hkl_ones_matrix = torch.ones((max_h*2 + 1, max_k * 2 + 1, max_l * 2 + 1))
+	# Get the indices of every point in that lattice and flatten it into a [n, 3] list
 	hkl_pts = torch.argwhere(hkl_ones_matrix) - torch.Tensor([max_h, 0, 0]) - torch.Tensor([0, max_k, 0]) - torch.Tensor([0, 0, max_l])
+	# Remove the incident beam from the list of hkl points by taking out the point at the center of the list, [0,0,0]
+	hkl_pts = hkl_pts[torch.arange(hkl_pts.size()[0]) != hkl_pts.size()[0] / 2 - 0.5]
 	return hkl_pts
-
 
 def get_fcoords_occus_zs_coeffs(structure):
 	fcoords = torch.tensor(structure[2], requires_grad = True)
@@ -196,7 +199,7 @@ def calc_lorentz_factor(recip_lengths, wavelength):
 
 
 
-def diffraction_calc(structure, q_max, wavelength = 1.54184):
+def diffraction_calc(structure, q_max, wavelength):
 	#default q_max should be 4 * pi / wavelength
 	# Calculate the cell matrix
 	cell_matrix = get_cell_matrix(structure)
@@ -226,21 +229,61 @@ def diffraction_calc(structure, q_max, wavelength = 1.54184):
 	# Calculate the lorentz factor based on the recip lengths
 	lorentz_factor = calc_lorentz_factor(recip_lengths, wavelength)
 
-	# Calculate two theta values from recip lengths
-	two_thetas = 2 * torch.asin(wavelength * recip_lengths / 2)
+	# Calculate two theta values from recip lengths and turn into degrees from rad
+	# two_thetas = 2 * torch.asin(wavelength * recip_lengths / 2) * 180 / pi
+	two_thetas = (360 / pi) * torch.asin(wavelength * recip_lengths / 2)
 
 	#Calculate intensities from i_hkl and correction factor (lorentz_factor)
 	intensities = i_hkl * lorentz_factor
 
+	# Wrap the two thetas and intensities together
 	pattern = torch.stack((two_thetas, intensities))
 
-	return pattern
+	# Remove all reflections which have unphysical angles/positions
+	pattern = pattern.T
+	filtered_pattern = pattern[~torch.any(pattern.isnan(), dim = 1)]
+
+	return filtered_pattern
 
 
 
-def diffraction_loss(structure_gen, structure_ref, q_max = 8):
-	ref_pattern = diffraction_calc(structure_ref, q_max)
-	gen_pattern = diffraction_calc(structure_gen, q_max)
+def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, num_steps = 256, fraction_gaussian = 0.5, fwhm = 0.3):
+	# This function is written to work in degrees, it can be used for q instead, but fwhm should change
+
+	# Calculate the theta range
+	two_theta_min = np.arcsin((q_min * wavelength) / (4 * pi)) * 360 / pi
+	two_theta_max = np.arcsin((q_max * wavelength) / (4 * pi)) * 360 / pi
+	
+	# Calculate the width of each bin
+	step_size = (two_theta_max - two_theta_min) / num_steps
+
+	# Make a tensor for the binned_pattern
+	binned_pattern = torch.zeros(num_steps)
+
+	# For ever hkl index, take the peak location and intensity
+	for i in diffraction_pattern:
+		# Make a tensor to transform into a peak
+		peak = torch.arange(num_steps) * step_size
+
+		#Turn that tensor into the pseudo-Voigt peak
+		position = i[0]
+		intensity = i[1]
+		ag = (2 / fwhm) * np.sqrt(np.log(2) / pi)
+		bg = (4 * np.log(2)) / (fwhm**2)
+		gaussian_peak = fraction_gaussian * ag * torch.exp(-bg * torch.square(peak - position))
+		lorentz_peak = (1 - fraction_gaussian) * fwhm / (2 * pi * (torch.square(peak - position) + (fwhm/2)**2))
+		peak = intensity * (gaussian_peak + lorentz_peak)
+
+		binned_pattern = binned_pattern + peak
+	return binned_pattern
+
+
+def diffraction_loss(structure_gen, structure_ref, wavelength = 1.54184, q_max = 8):
+	ref_pattern = diffraction_calc(structure_ref, q_max, wavelength)
+	binned_ref_pattern = bin_pattern_theta(ref_pattern, wavelength)
+	print(binned_ref_pattern)
+	gen_pattern = diffraction_calc(structure_gen, q_max, wavelength)
+	binned_gen_pattern = bin_pattern_theta(gen_pattern, wavelength)
 
 
 angles_ref = [90.0,90.0,90.0]
