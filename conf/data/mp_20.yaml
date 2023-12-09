@@ -33,7 +33,7 @@ datamodule:
       graph_method: ${data.graph_method}
       lattice_scale_method: ${data.lattice_scale_method}
       preprocess_workers: ${data.preprocess_workers}
-      train_fraction: 0.25
+      train_fraction: 1
 
     val:
       - _target_: cdvae.pl_data.dataset.CrystDataset
