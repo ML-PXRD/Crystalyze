@@ -4,6 +4,7 @@ from __future__ import annotations
 import torch
 from math import pi
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 # XRD wavelengths in angstroms
@@ -179,18 +180,18 @@ def get_fcoords_occus_zs_coeffs(structure):
 
 	# Collect the coefficients for each element in the structure into a torch tensor from the atom_form_factor_constants dictionary
 	coeffs = torch.Tensor(atom_form_factor_constants)
-	coeffs = coeffs[zs]
+	coeffs = coeffs[zs - 1]
 
 	return fcoords, occus, zs, coeffs
 
 
 def calc_atomic_scattering_factor(zs, recip_lengths, coeffs):
 	#Add additional dimension to the r^2 list for each hkl
-	squared_recip_lengths = torch.square(recip_lengths).unsqueeze(0)
+	squared_recip_lengths = torch.square(recip_lengths/2).unsqueeze(0)
 
 	# Calculate the exponentiated component of the fitted atomic scattering factor
 	extinct_exp = torch.exp(-coeffs[:, :, 1].unsqueeze(2) * squared_recip_lengths)
-
+	
 	# Calculate the whole of the fitted atomic scattering factor function
 	fitted_factor = torch.sum(coeffs[:, :, 0].unsqueeze(2) * extinct_exp, axis = 1)
 
@@ -219,7 +220,7 @@ def calc_lorentz_factor(recip_lengths, wavelength):
 
 
 def diffraction_calc(structure, q_max, wavelength):
-	#default q_max should be 4 * pi / wavelength
+	# default q_max should be 4 * pi / wavelength
 	# Calculate the cell matrix
 	cell_matrix = get_cell_matrix(structure)
 
@@ -266,8 +267,8 @@ def diffraction_calc(structure, q_max, wavelength):
 
 
 
-def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, num_steps = 256, fraction_gaussian = 0.5, fwhm = 0.3):
-	# This function is written to work in degrees, it can be used for q instead, but fwhm should change
+def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, num_steps = 256, fraction_gaussian = 0.5, fwhm = 1):
+	# This function is written to work in degrees, it can be used for q instead, but fwhm should change, and the step size should be calculated differently
 
 	# Calculate the theta range
 	two_theta_min = np.arcsin((q_min * wavelength) / (4 * pi)) * 360 / pi
@@ -301,13 +302,37 @@ def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, n
 	binned_pattern = torch.sum(combined_peak, axis = 1)
 	return binned_pattern
 
+def pymatgen_pattern(pattern):
+	two_thetas = [0]
+	temp_pattern = torch.Tensor([[0,0]])
+	for i in range(pattern.size()[0]):
+		if pattern[i, 1] > 0.001:
+			ind = torch.where(torch.abs(torch.Tensor(two_thetas) - pattern[i, 0]) < 0.1)
+			if ind[0].size()[0] > 0:
+				temp_pattern[ind[0]][0][1] = temp_pattern[ind[0]][0][1] + pattern[i][1]
+			else:
+				temp_pattern = torch.cat((temp_pattern, pattern[i].unsqueeze(0)))
+				two_thetas.append(pattern[i][0])
+	print(temp_pattern)
+
 
 def diffraction_loss(structure_gen, structure_ref, wavelength = 1.54184, q_max = 4):
 	ref_pattern = diffraction_calc(structure_ref, q_max, wavelength)
 	binned_ref_pattern = bin_pattern_theta(ref_pattern, wavelength, q_max = q_max)
-	print(binned_ref_pattern)
 	gen_pattern = diffraction_calc(structure_gen, q_max, wavelength)
 	binned_gen_pattern = bin_pattern_theta(gen_pattern, wavelength, q_max = q_max)
+	
+	# TODO: Remove this temporary block of code which plots the diffraction patterns
+	q_min = 0.5
+	num_steps = 256
+	two_theta_min = np.arcsin((q_min * wavelength) / (4 * pi)) * 360 / pi
+	two_theta_max = np.arcsin((q_max * wavelength) / (4 * pi)) * 360 / pi
+	step_size = (two_theta_max - two_theta_min) / num_steps
+	domain = np.arange(len(binned_ref_pattern)) * step_size + two_theta_min
+	plt.plot(domain, binned_ref_pattern.detach().numpy())
+	plt.plot(domain, binned_gen_pattern.detach().numpy())
+	plt.savefig("diffraction_loss.png")
+	
 
 
 angles_ref = [90.0,90.0,90.0]
@@ -318,7 +343,7 @@ zs_ref = [1,2]
 
 angles_gen = [90.0,90.0,90.0]
 lengths_gen = [4.0,4.0,4.0]
-atom_positions_gen = [[0,0,0],[0.5,0.5,0.49]]
+atom_positions_gen = [[0,0,0],[0.5,0.5,0.5]]
 atom_types_gen = [[0.25,0.75],[0.25,0.75]]
 zs_gen = [1,2]
 
