@@ -16,6 +16,14 @@ use_discrete_simulated_xrd: false
 type_fixing: false
 dropout_rate: 0
 decoder_dropout: 0
+use_differentiable_diffraction_loss: True
+differentiable_diffraction_weight: 1
+
+wavelength : 1.5406
+q_max :  8
+q_min : 0.5
+num_steps : 200
+
 
 hidden_dim: 256
 latent_dim: 256
@@ -40,6 +48,7 @@ type_sigma_begin: 5.
 type_sigma_end: 0.01
 num_noise_level: 50
 predict_property: False
+
 
 defaults:
   - encoder: dimenet

@@ -16,6 +16,7 @@ from cdvae.common.data_utils import (
     frac_to_cart_coords, min_distance_sqr_pbc)
 from cdvae.pl_modules.embeddings import MAX_ATOMIC_NUM
 from cdvae.pl_modules.embeddings import KHOT_EMBEDDINGS
+from cdvae.pl_modules.diffraction_calc import diffraction_calc, bin_pattern_theta
 
 #added by Tsach
 from pymatgen.core.structure import Structure
@@ -155,7 +156,7 @@ class CDVAE(BaseModule):
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
         self.use_composition_constraint = self.hparams.use_composition_constraint
         self.use_diffraction_loss = self.hparams.use_diffraction_loss
-
+        
         self.concat_peak_intensities = self.hparams.concat_peak_intensities
         self.concat_elemental_composition = self.hparams.concat_elemental_composition
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
@@ -163,6 +164,15 @@ class CDVAE(BaseModule):
         self.type_fixing = getattr(self.hparams, 'type_fixing', False)
         self.dropout_rate = getattr(self.hparams, 'dropout_rate', 0.0)
         self.decoder_dropout = getattr(self.hparams, 'decoder_dropout', 0.0)
+        self.use_differentiable_diffraction_loss = getattr(self.hparams, 'use_differentiable_diffraction_loss', False)
+        self.differentiable_diffraction_weight = getattr(self.hparams, 'differentiable_diffraction_weight', 0.0)
+
+        #diffraction pattern parameters
+        self.wavelength = getattr(self.hparams, 'wavelength', 1.5406)
+        self.q_max = getattr(self.hparams, 'q_max', 8)
+        self.q_min = getattr(self.hparams, 'q_min', 0.5)
+        self.num_steps = getattr(self.hparams, 'num_steps', 200)
+
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
@@ -622,6 +632,66 @@ class CDVAE(BaseModule):
             pred_cart_coord_diff, noisy_frac_coords, used_sigmas_per_atom, batch)
         type_loss = self.type_loss(pred_atom_types, batch.atom_types,
                                 used_type_sigmas_per_atom, batch)
+        
+        differentiable_diffraction_loss = 0 
+        
+        if self.use_differentiable_diffraction_loss: 
+            #get the binned pattern for the ground truth 
+            # TO-DO: PUT THIS IN THE DATALOADER/DATASET MODULE
+
+            batch_of_patterns = torch.stack((xrd_loc, xrd_int), axis = 2)
+
+            # Initialize an empty list to store the results
+            binned_patterns_list = []
+
+            # Loop over each 256x2 slice in the batch
+            for i in range(batch_of_patterns.shape[0]):
+                # Extract the 256x2 slice
+                diffraction_pattern_slice = batch_of_patterns[i, :, :]
+
+                # Apply the bin_pattern_theta function to this slice
+                binned_pattern = bin_pattern_theta(diffraction_pattern_slice, self.wavelength, q_max=self.q_max,
+                                                                    q_min=self.q_min, num_steps=self.num_steps)
+
+                # Append the result to the list
+                binned_patterns_list.append(binned_pattern)
+
+            # Convert the list of results into a 256x200 tensor
+            gt_binned_patterns_tensor = torch.stack(binned_patterns_list, dim=0)
+
+            #get the cartesian coordinates 
+            noisy_cart_coords = frac_to_cart_coords(
+                    noisy_frac_coords, batch.lengths, batch.angles, batch.num_atoms)
+            target_cart_coords = frac_to_cart_coords(
+                batch.frac_coords, batch.lengths, batch.angles, batch.num_atoms)
+            _, target_cart_coord_diff = min_distance_sqr_pbc(
+                target_cart_coords, noisy_cart_coords, batch.lengths, batch.angles,
+                batch.num_atoms, self.device, return_vector=True)
+
+            target_cart_coord_diff = target_cart_coord_diff / \
+                    used_sigmas_per_atom[:, None]**2
+            pred_cart_coord_diff = pred_cart_coord_diff / \
+                    used_sigmas_per_atom[:, None]
+            
+            #get the predicted cartesian coordinates by adding 
+            pred_cart_coord = noisy_cart_coords + pred_cart_coord_diff
+
+            #loop over all of the unique crystals 
+            for index in range(len(batch.num_atoms)):
+               
+                pred_angles_i = pred_angles[index]
+                pred_lengths_i = pred_lengths[index]
+                atom_positions_ref_i = pred_cart_coord[torch.sum(batch.num_atoms[:index]):batch.num_atoms[index]]
+                atom_types_ref_i = pred_atom_types[torch.sum(batch.num_atoms[:index]):batch.num_atoms[index]]
+                zs_ref = np.arange(0,100)
+                zs_ref = torch.tensor(zs_ref).to('cuda:0')
+                structure_ref_i = [pred_angles_i, pred_lengths_i, atom_positions_ref_i, atom_types_ref_i, zs_ref]
+
+                pred_diffraction_pattern_i = self.differentiable_diffraction_calculator(structure_ref_i, q_min = self.q_min, num_steps = self.num_steps, wavelength = self.wavelength, q_max = self.q_max)
+                
+                #calculate the differentiable diffraction loss
+                gt_diffraction_pattern_i = gt_binned_patterns_tensor[index]
+                differentiable_diffraction_loss += self.differentiable_diffraction_loss(gt_diffraction_pattern_i, pred_diffraction_pattern_i)
 
         if self.hparams.predict_property:
             property_loss = self.property_loss(z, batch)
@@ -658,6 +728,7 @@ class CDVAE(BaseModule):
             'rand_frac_coords': noisy_frac_coords,
             'rand_atom_types': rand_atom_types,
             'z': z,
+            'differentiable_diffraction_loss': differentiable_diffraction_loss
         }
     
     def generate_rand_init(self, pred_composition_per_atom, pred_lengths,
@@ -739,6 +810,17 @@ class CDVAE(BaseModule):
 
     def property_loss(self, z, batch):
         return F.mse_loss(self.fc_property(z), batch.y)
+    
+    def differentiable_diffraction_calculator(self, structure_ref,
+                                              q_min = 0.356, num_steps = 200, wavelength = 1.54184, q_max = 4.962):
+
+        pattern = diffraction_calc(structure_ref, q_max=q_max, wavelength=wavelength)
+        binned_pattern = bin_pattern_theta(pattern, wavelength, q_max = q_max, q_min=q_min, num_steps = num_steps)
+
+        return binned_pattern
+
+    def differentiable_diffraction_loss(self, pred_binned_pattern, gt_binned_pattern):
+        return -1*F.cosine_similarity(pred_binned_pattern, gt_binned_pattern, dim=1).mean()
     
     def diffraction_property_loss(self, z, gt_xrd_loc, gt_xrd_int):
 
@@ -935,6 +1017,7 @@ class CDVAE(BaseModule):
         composition_loss = outputs['composition_loss']
         property_loss = outputs['property_loss']
         diffraction_loss = outputs['diffraction_loss']
+        differentiable_diffraction_loss = outputs['differentiable_diffraction_loss']
 
         loss = (
             self.hparams.cost_natom * num_atom_loss +
@@ -944,7 +1027,8 @@ class CDVAE(BaseModule):
             self.hparams.beta * kld_loss +
             self.hparams.cost_composition * composition_loss +
             self.hparams.cost_property * property_loss + 
-            self.hparams.cost_diffraction * diffraction_loss)
+            self.hparams.cost_diffraction * diffraction_loss + 
+            self.differentiable_diffraction_weight * differentiable_diffraction_loss)
 
         log_dict = {
             f'{prefix}_loss': loss,

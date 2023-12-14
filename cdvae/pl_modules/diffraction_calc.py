@@ -10,14 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F
 
-# Preliminary steps
-# XRD wavelengths in angstroms
-with open("atomic_scattering_params.json") as f:
-	ATOMIC_SCATTERING_PARAMS = json.load(f)
 
 import pandas as pd
-
-len(list(ATOMIC_SCATTERING_PARAMS.keys()))
 
 atom_names = {
 	1: "H",
@@ -242,24 +236,24 @@ atom_form_factor_constants = [
 	[[6.936, 29.522], [6.031, 5.066], [2.664, 0.538], [0, 0]],
 	[[6.949, 29.56], [6.044, 5.076], [2.667, 0.538], [0, 0]],
 ]
-
-
+# Check if GPU is available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_cell_matrix(structure):
-    # angles = torch.tensor(structure[0], requires_grad=True)
-    # lengths = torch.tensor(structure[1], requires_grad=True)
-    
-    angles = structure[0]
-    lengths = structure[1]
+ 
+
+    # Convert angles and lengths to tensors and move to the device
+    angles = torch.tensor(structure[0], device=device)
+    lengths = torch.tensor(structure[1], device=device)
 
     angles_rad = angles * 3.14 / 180
 
-    a_vector = torch.tensor([1, 0, 0]) * lengths[0]
-    b_vector = (torch.tensor([1,0,0]) * torch.cos(angles_rad[2]) + torch.tensor([0,1,0]) * torch.sin(angles_rad[2])) * lengths[1]
-    c_vector = (torch.tensor([1,0,0]) * torch.cos(angles_rad[1]) + torch.tensor([0,1,0]) * ((torch.cos(angles_rad[0]) - torch.cos(angles_rad[1]) * torch.cos(angles_rad[2])) /  torch.sin(angles_rad[2])) + torch.tensor([0,0,1]) * torch.sqrt(1 - torch.square(torch.cos(angles_rad[1])) - torch.square((torch.cos(angles_rad[0]) - torch.cos(angles_rad[1]) * torch.cos(angles_rad[2])) / torch.sin(angles_rad[2]))) )* lengths[2]
-    cell_matrix = torch.stack((a_vector,b_vector, c_vector))
-    return cell_matrix
+    a_vector = torch.tensor([1, 0, 0], device=device) * lengths[0]
+    b_vector = (torch.tensor([1, 0, 0], device=device) * torch.cos(angles_rad[2]) + torch.tensor([0, 1, 0], device=device) * torch.sin(angles_rad[2])) * lengths[1]
+    c_vector = (torch.tensor([1, 0, 0], device=device) * torch.cos(angles_rad[1]) + torch.tensor([0, 1, 0], device=device) * ((torch.cos(angles_rad[0]) - torch.cos(angles_rad[1]) * torch.cos(angles_rad[2])) / torch.sin(angles_rad[2])) + torch.tensor([0, 0, 1], device=device) * torch.sqrt(1 - torch.square(torch.cos(angles_rad[1])) - torch.square((torch.cos(angles_rad[0]) - torch.cos(angles_rad[1]) * torch.cos(angles_rad[2])) / torch.sin(angles_rad[2])))) * lengths[2]
 
+    cell_matrix = torch.stack((a_vector, b_vector, c_vector))
+    return cell_matrix
 
 def collect_recip_latt_points(cell_matrix, q_max):
     
@@ -281,24 +275,27 @@ def collect_recip_latt_points(cell_matrix, q_max):
 
 
 def get_points_in_sphere(max_h, max_k, max_l):
-    # Create a matrix of ones representing the reciprocal lattice
-    hkl_ones_matrix = torch.ones((max_h*2 + 1, max_k*2 + 1, max_l*2 + 1))
+	# Create a matrix of ones representing the reciprocal lattice
+	hkl_ones_matrix = torch.ones((max_h*2 + 1, max_k*2 + 1, max_l*2 + 1), device=device)
 
-    # Get the indices of every point in that lattice and flatten it into a [n, 3] list
-    hkl_pts = torch.nonzero(hkl_ones_matrix, as_tuple=False) - torch.Tensor([max_h, max_k, max_l])
+	# Get the indices of every point in that lattice and flatten it into a [n, 3] list
+	hkl_pts = torch.nonzero(hkl_ones_matrix, as_tuple=False) - torch.tensor([max_h, max_k, max_l], device=device)
 
-    # Calculate the radius squared for comparison (to avoid square root for efficiency)
-    radius_squared = max_h**2 + max_k**2 + max_l**2
+	# Calculate the radius squared for comparison (to avoid square root for efficiency)
+	radius_squared = max_h**2 + max_k**2 + max_l**2
 
-    # Filter out the points that are outside the sphere
-    distances_squared = torch.sum(hkl_pts**2, dim=1)
-    hkl_pts_in_sphere = hkl_pts[distances_squared <= radius_squared]
+	# Filter out the points that are outside the sphere
+	distances_squared = torch.sum(hkl_pts**2, dim=1)
+	hkl_pts_in_sphere = hkl_pts[distances_squared <= radius_squared]
 
-    # Remove the incident beam from the list of hkl points (point at the center)
-    center = torch.tensor([0, 0, 0])
-    hkl_pts_in_sphere = hkl_pts_in_sphere[torch.any(hkl_pts_in_sphere != center, dim=1)]
+	# Remove the incident beam from the list of hkl points (point at the center)
+	center = torch.tensor([0, 0, 0], device=device)
+	hkl_pts_in_sphere = hkl_pts_in_sphere[torch.any(hkl_pts_in_sphere != center, dim=1)]
 
-    return hkl_pts_in_sphere
+	#convert to float
+	hkl_pts_in_sphere = hkl_pts_in_sphere.to(torch.float32)
+
+	return hkl_pts_in_sphere
 
 
 def get_fcoords_occus_zs_coeffs(structure):
@@ -312,7 +309,7 @@ def get_fcoords_occus_zs_coeffs(structure):
     coeffs = []
 
     # Collect the coefficients for each element in the structure into a torch tensor from the atom_form_factor_constants dictionary
-    coeffs = torch.tensor(atom_form_factor_constants, dtype=torch.float32)
+    coeffs = torch.tensor(atom_form_factor_constants, dtype=torch.float32, device=device)
     coeffs = coeffs[zs - 1]
 
     return fcoords, occus, zs, coeffs
@@ -338,18 +335,18 @@ def calc_atomic_scattering_factor(zs, recip_lengths, coeffs):
 
 def calc_lorentz_factor(recip_lengths, wavelength):
     # Calculate a theta list from r's
-    #theta = torch.asin(wavelength * recip_lengths / 2)
+    theta = torch.asin(wavelength * recip_lengths / 2)
 
     # Calculate how the intensity of peaks are expected to tail off due to geometric constraints of experiments
-    #lorentz_factor = (1 + torch.square(torch.cos(2 * theta))) / (torch.square(torch.sin(theta)) * torch.cos(theta))
+    lorentz_factor = (1 + torch.square(torch.cos(2 * theta))) / (torch.square(torch.sin(theta)) * torch.cos(theta))
 
     """Another way to calculate it without trig functions is
     x = wavelength * recip_lengths / 2
     lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
     """
 
-    x = wavelength * recip_lengths / 2
-    lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
+    # x = wavelength * recip_lengths / 2
+    # lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
 
     return lorentz_factor
 
@@ -391,7 +388,7 @@ def diffraction_calc(structure, q_max, wavelength):
     two_thetas = (360 / 3.14) * torch.asin(clamped_input)
 
     #Calculate intensities from i_hkl and correction factor (lorentz_factor)
-    intensities = i_hkl * 1 # changed to allow back prop
+    intensities = i_hkl * lorentz_factor # changed to allow back prop
 
     # Wrap the two thetas and intensities together
     pattern = torch.stack((two_thetas, intensities))
@@ -405,44 +402,57 @@ def diffraction_calc(structure, q_max, wavelength):
 
 
 def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, num_steps = 256, fraction_gaussian = 0.5, fwhm = 1):
-    # This function is written to work in degrees, it can be used for q instead, but fwhm should change, and the step size should be calculated differently
+	# This function is written to work in degrees, it can be used for q instead, but fwhm should change, and the step size should be calculated differently
 
-    # Calculate the theta range
-    two_theta_min = np.arcsin((q_min * wavelength) / (4 * 3.14)) * 360 / 3.14
-    two_theta_max = np.arcsin((q_max * wavelength) / (4 * 3.14)) * 360 / 3.14
+	#print out the arguments
+	# print("the wavelength is {}, the q_min is {}, the q_max is {}, the number of steps is {}, the fraction gaussian is {}, and the fwhm is {}".format(wavelength, q_min, q_max, num_steps, fraction_gaussian, fwhm))
 
-    # Calculate the width of each bin
+	# Calculate the theta range
+	two_theta_min = np.arcsin((q_min * wavelength) / (4 * 3.14)) * 360 / 3.14
+	two_theta_max = np.arcsin((q_max * wavelength) / (4 * 3.14)) * 360 / 3.14
+	# print("the two theta min is", two_theta_min, "and the two theta max is", two_theta_max)
+     
 
-    step_size = (two_theta_max - two_theta_min) / num_steps
+	# Calculate the width of each bin
 
-    # Calculate prefactors for the pseudo-Voigt peak
-    #ag = (2 / fwhm) * np.sqrt(np.log(2) / pi)
-    ag = 0.9394372787 / fwhm
-    #bg = (4 * np.log(2)) / (fwhm**2)
-    bg = 2.77258872224 / (fwhm**2)
+	step_size = (two_theta_max - two_theta_min) / num_steps
+	# print("the step size is", step_size)
 
-    # Make a tensor for the domain of the pattern
-    pattern_domain = torch.arange(num_steps) * step_size + two_theta_min
+	# Calculate prefactors for the pseudo-Voigt peak
+	#ag = (2 / fwhm) * np.sqrt(np.log(2) / pi)
+	ag = 0.9394372787 / fwhm
+	#bg = (4 * np.log(2)) / (fwhm**2)
+	bg = 2.77258872224 / (fwhm**2)
 
-    # Setup a domain for each peak in diffraction_pattern
-    peaks = torch.ones((len(diffraction_pattern))) * pattern_domain.unsqueeze(1)
+	# Make a tensor for the domain of the pattern
+	pattern_domain = torch.arange(num_steps, device=device) * step_size + two_theta_min
+	# print("the pattern domain is", pattern_domain)
 
-    # Calculate the gaussian component of the peak
-    gaussian_peak = fraction_gaussian * ag * torch.exp(-bg * torch.square(peaks - diffraction_pattern[:, 0]))
+	# Setup a domain for each peak in diffraction_pattern
+	peaks = torch.ones((len(diffraction_pattern)), device=device) * pattern_domain.unsqueeze(1)
+	# print('the peaks are', peaks)
 
-    # Calculate the lorentzian component of the peak
-    lorentz_peak = (1 - fraction_gaussian) * fwhm / (6.28318530718 * (torch.square(peaks - diffraction_pattern[:, 0]) + (fwhm/2)**2))
+	# Calculate the gaussian component of the peak
+	gaussian_peak = fraction_gaussian * ag * torch.exp(-bg * torch.square(peaks - diffraction_pattern[:, 0]))
+	# print('the gaussian peak is', gaussian_peak)
 
-    # Calculate the combined peak
-    combined_peak = diffraction_pattern[:, 1] * (gaussian_peak + lorentz_peak)
+	# Calculate the lorentzian component of the peak
+	lorentz_peak = (1 - fraction_gaussian) * fwhm / (6.28318530718 * (torch.square(peaks - diffraction_pattern[:, 0]) + (fwhm/2)**2))
+	# print('the lorentz peak is', lorentz_peak)
 
-    # Sum over all peaks to get the binned pattern
-    binned_pattern = torch.sum(combined_peak, axis = 1)
-    return binned_pattern
+	# Calculate the combined peak
+	combined_peak = diffraction_pattern[:, 1] * (gaussian_peak + lorentz_peak)
+	# print('the combined peak is', combined_peak)
+
+	# Sum over all peaks to get the binned pattern
+	binned_pattern = torch.sum(combined_peak, axis = 1)
+	# print('the binned pattern is', binned_pattern)
+
+	return binned_pattern
 
 def pymatgen_pattern(pattern):
     two_thetas = [0]
-    temp_pattern = torch.Tensor([[0,0]])
+    temp_pattern = torch.tensor([[0,0]])
     for i in range(pattern.size()[0]):
         if pattern[i, 1] > 0.001:
             ind = torch.where(torch.abs(torch.Tensor(two_thetas) - pattern[i, 0]) < 0.1)

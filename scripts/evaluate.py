@@ -338,7 +338,7 @@ if __name__ == '__main__':
     parser.add_argument('--label', default='')
 
     #number of batches to evaluate
-    parser.add_argument('--num_batches', default=15, type=int)
+    parser.add_argument('--num_batches', default=36, type=int)
 
     args = parser.parse_args()
 

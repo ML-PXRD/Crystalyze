@@ -1,2 +1,0 @@
-Perov models take about an hour to get started on training 
-MP_20 models take about 2.5 hours to get started on training 

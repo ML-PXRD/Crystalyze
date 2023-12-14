@@ -1,5 +1,0 @@
-Date              = Sun Nov 26 20:02:02 EST 2023
-Hostname          = d-16-1-3
-Working Directory = /home/gridsan/tmackey/XRD_is_All_You_Need/ICSD/1. FCN/11-26-2023_lattice_parameters_convet
-No Modulefiles Currently Loaded.
-slurmstepd-d-16-1-3: error: *** JOB 24339255 ON d-16-1-3 CANCELLED AT 2023-11-26T20:02:04 ***
