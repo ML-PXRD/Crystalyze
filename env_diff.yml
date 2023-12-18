@@ -1,0 +1,20 @@
+channels:
+- pytorch
+- pyg
+- https://repo.anaconda.com/pkgs/main
+- defaults
+- https://conda.anaconda.org/conda-forge
+dependencies:
+- ipywidgets=8.1.0=pyhd8ed1ab_0
+- jupyterlab=4.0.5=pyhd8ed1ab_0
+- matminer=0.7.3=pyhd8ed1ab_0
+- matplotlib=3.7.2=py38h578d9bd_0
+- monty=2023.9.5=pyhd8ed1ab_0
+- nglview=3.0.6=pyhba93850_0
+- pip=23.2.1=pyhd8ed1ab_0
+- pyg=2.0.1=py38_torch_1.8.0_cu102
+- pylint=2.17.5=pyhd8ed1ab_0
+- setuptools=68.1.2=pyhd8ed1ab_0
+- pip:
+  - pymatgen==2023.8.10
+name: cdvae
