@@ -36,11 +36,14 @@ def generate_unique_id(structure):
 
 # Define a function to get XRD pattern
 def calculate_xrd(structure):
-    # Initialize the XRDCalculator with a wavelength of CuKa (1.54060 Å)
-    xrd_calculator = XRDCalculator(wavelength='CuKa')
+    try:
+        # Initialize the XRDCalculator with a wavelength of CuKa (1.54060 Å)
+        xrd_calculator = XRDCalculator(wavelength='CuKa')
 
-    pattern = xrd_calculator.get_pattern(structure)
-    return pattern
+        pattern = xrd_calculator.get_pattern(structure)
+        return pattern
+    except:
+        return 0
 
 def main(list_of_folder_directories, generate_patterns, change_TsachID):
     if generate_patterns == 'True':
@@ -52,38 +55,41 @@ def main(list_of_folder_directories, generate_patterns, change_TsachID):
 
             # Initialize the XRDCalculator
             xrd_calculator = XRDCalculator()
+            
+            from tqdm.auto import tqdm
+            tqdm.pandas()
 
-            df_train_structures = df_train['cif'].apply(lambda x: Structure.from_str(x, fmt='cif'))
-            df_val_structures = df_val['cif'].apply(lambda x: Structure.from_str(x, fmt='cif'))
-            df_test_structures = df_test['cif'].apply(lambda x: Structure.from_str(x, fmt='cif'))
+            df_train_structures = df_train['cif'].progress_apply(lambda x: Structure.from_str(x, fmt='cif'))
+            df_val_structures = df_val['cif'].progress_apply(lambda x: Structure.from_str(x, fmt='cif'))
+            df_test_structures = df_test['cif'].progress_apply(lambda x: Structure.from_str(x, fmt='cif'))
 
             # Calculate XRD patterns for train, val, and test datasets
-            df_train['xrd'] = df_train_structures.apply(calculate_xrd)
-            df_val['xrd'] = df_val_structures.apply(calculate_xrd)
-            df_test['xrd'] = df_test_structures.apply(calculate_xrd)
+            df_train['xrd'] = df_train_structures.progress_apply(calculate_xrd)
+            df_val['xrd'] = df_val_structures.progress_apply(calculate_xrd)
+            df_test['xrd'] = df_test_structures.progress_apply(calculate_xrd)
 
             #make a column with only the peak locations 
-            df_train['xrd_peak_locations'] = df_train['xrd'].apply(lambda x: x.x.tolist())
-            df_val['xrd_peak_locations'] = df_val['xrd'].apply(lambda x: x.x.tolist())
-            df_test['xrd_peak_locations'] = df_test['xrd'].apply(lambda x: x.x.tolist())
+            df_train['xrd_peak_locations'] = df_train['xrd'].progress_apply(lambda x: x.x.tolist())
+            df_val['xrd_peak_locations'] = df_val['xrd'].progress_apply(lambda x: x.x.tolist())
+            df_test['xrd_peak_locations'] = df_test['xrd'].progress_apply(lambda x: x.x.tolist())
 
             #make a column with only the peak intensities
-            df_train['xrd_peak_intensities'] = df_train['xrd'].apply(lambda x: x.y.tolist())
-            df_val['xrd_peak_intensities'] = df_val['xrd'].apply(lambda x: x.y.tolist())
-            df_test['xrd_peak_intensities'] = df_test['xrd'].apply(lambda x: x.y.tolist())
+            df_train['xrd_peak_intensities'] = df_train['xrd'].progress_apply(lambda x: x.y.tolist())
+            df_val['xrd_peak_intensities'] = df_val['xrd'].progress_apply(lambda x: x.y.tolist())
+            df_test['xrd_peak_intensities'] = df_test['xrd'].progress_apply(lambda x: x.y.tolist())
 
             #make a column with only the atomic numbers (instead of the atomic species)
-            df_train['atomic_numbers'] = df_train_structures.apply(lambda x: [Element(specie).Z for specie in x.species])
-            df_val['atomic_numbers'] = df_val_structures.apply(lambda x: [Element(specie).Z for specie in x.species])
-            df_test['atomic_numbers'] = df_test_structures.apply(lambda x: [Element(specie).Z for specie in x.species])
+            df_train['atomic_numbers'] = df_train_structures.progress_apply(lambda x: [Element(specie).Z for specie in x.species])
+            df_val['atomic_numbers'] = df_val_structures.progress_apply(lambda x: [Element(specie).Z for specie in x.species])
+            df_test['atomic_numbers'] = df_test_structures.progress_apply(lambda x: [Element(specie).Z for specie in x.species])
 
             #make a column called "TsachID" that creates a unique ID for each structure based on 
             # (a) atomic_species (b) frac_coordinates (c) lattice lengths and angles
 
             # Apply the unique ID generation function to the structures to create the "TsachID" column
-            df_train['TsachID'] = df_train_structures.apply(generate_unique_id)
-            df_val['TsachID'] = df_val_structures.apply(generate_unique_id)
-            df_test['TsachID'] = df_test_structures.apply(generate_unique_id)
+            df_train['TsachID'] = df_train_structures.progress_apply(generate_unique_id)
+            df_val['TsachID'] = df_val_structures.progress_apply(generate_unique_id)
+            df_test['TsachID'] = df_test_structures.progress_apply(generate_unique_id)
 
             #save the dataframes as csv files
             df_train.to_csv(folder_dir + 'train_xrd.csv')

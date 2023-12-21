@@ -679,58 +679,63 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     print("using {} rows given a train_fraction of {}".format(n, train_fraction))
 
     def process_one(row, niggli, primitive, graph_method, prop_list):
-        crystal_str = row['cif']
+        try:
+            crystal_str = row['cif']
 
-        extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers', 'disc_sim_xrd']
-        extra_feature_data = []
+            extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers', 'disc_sim_xrd']
+            extra_feature_data = []
 
-        for feature in extra_feature_names:
-            
-            #some extra processing for disc_sim_xrd
-            if feature == 'disc_sim_xrd':
-                s = row[feature][1:-1]
+            for feature in extra_feature_names:
+                
+                #some extra processing for disc_sim_xrd
+                if feature == 'disc_sim_xrd':
+                    s = row[feature][1:-1]
 
-                # Split the string based on spaces
-                row[feature] = [float(val) for val in s.split() if val]
-                feature_val_rough = row[feature]
-            else:
+                    # Split the string based on spaces
+                    row[feature] = [float(val) for val in s.split() if val]
+                    feature_val_rough = row[feature]
+                else:
 
-                #use ast to convert string to list
-                feature_val_rough = ast.literal_eval(row[feature])
+                    #use ast to convert string to list
+                    feature_val_rough = ast.literal_eval(row[feature])
 
-            #if the feature is atomic_numbers, get only the unique values and randomize
-            if feature == 'atomic_numbers':
-                # get the unique values
-                feature_val_rough = list(set(feature_val_rough))
-                # randomize the order 
-                random.shuffle(feature_val_rough)
+                #if the feature is atomic_numbers, get only the unique values and randomize
+                if feature == 'atomic_numbers':
+                    # get the unique values
+                    feature_val_rough = list(set(feature_val_rough))
+                    # randomize the order 
+                    random.shuffle(feature_val_rough)
 
-            #ensure that the vector is 256 long with 0 padding
-            if len(feature_val_rough) < 256:
-                feature_val_refined = feature_val_rough + [0]*(256-len(feature_val_rough))
-            else:
-                feature_val_refined = feature_val_rough[:256]
-    
-            #create tensors for everything 
-            feature_tensor = torch.tensor(feature_val_refined)
-            extra_feature_data.append(feature_tensor)
-        # print(extra_feature_data)
-        crystal = build_crystal(
-            crystal_str, niggli=niggli, primitive=primitive)
-        graph_arrays = build_crystal_graph(crystal, graph_method)
-        properties = {k: row[k] for k in prop_list if k in row.keys()}
-        result_dict = {
-            'mp_id': row['material_id'],
-            'cif': crystal_str,
-            'graph_arrays': graph_arrays,
-            'xrd_intensities': extra_feature_data[0],
-            'xrd_locations': extra_feature_data[1],
-            'atomic_species': extra_feature_data[2],
-            'disc_sim_xrd': extra_feature_data[3],
-        }
-        # print(result_dict)
-        result_dict.update(properties)
-        return result_dict
+                #ensure that the vector is 256 long with 0 padding
+                if len(feature_val_rough) < 256:
+                    feature_val_refined = feature_val_rough + [0]*(256-len(feature_val_rough))
+                else:
+                    feature_val_refined = feature_val_rough[:256]
+        
+                #create tensors for everything 
+                feature_tensor = torch.tensor(feature_val_refined)
+                extra_feature_data.append(feature_tensor)
+            # print(extra_feature_data)
+            crystal = build_crystal(
+                crystal_str, niggli=niggli, primitive=primitive)
+            graph_arrays = build_crystal_graph(crystal, graph_method)
+            properties = {k: row[k] for k in prop_list if k in row.keys()}
+            result_dict = {
+                'mp_id': row['material_id'],
+                'cif': crystal_str,
+                'graph_arrays': graph_arrays,
+                'xrd_intensities': extra_feature_data[0],
+                'xrd_locations': extra_feature_data[1],
+                'atomic_species': extra_feature_data[2],
+                'disc_sim_xrd': extra_feature_data[3],
+            }
+            # print(result_dict)
+            result_dict.update(properties)
+            return result_dict
+        except Exception as e:
+            print(e)
+            print(row['cif'])
+            return None
     # print(df)
     unordered_results = p_umap(
         process_one,

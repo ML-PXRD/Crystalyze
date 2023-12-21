@@ -58,9 +58,9 @@ datamodule:
         preprocess_workers: ${data.preprocess_workers}
 
   num_workers:
-    train: 0
-    val: 0
-    test: 0
+    train: 40
+    val: 20
+    test: 20
 
   batch_size:
     train: 256
