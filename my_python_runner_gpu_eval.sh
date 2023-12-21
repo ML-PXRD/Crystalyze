@@ -25,5 +25,5 @@ if [ "$3" == "True" ]; then
 fi
 
 echo "Second argument is $2"
-python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2 --save_traj True $FORCE_ATOM_TYPES_FLAG --num_evals $4 
+python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2 --save_traj True $FORCE_ATOM_TYPES_FLAG
 python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True

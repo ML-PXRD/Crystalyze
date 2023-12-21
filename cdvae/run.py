@@ -144,10 +144,6 @@ def run(cfg: DictConfig) -> None:
         ckpt = None
           
     hydra.utils.log.info("Instantiating the Trainer")
-
-    #put the model on the GPU
-    model.cuda()
-
     trainer = pl.Trainer(
         default_root_dir=hydra_dir,
         logger=wandb_logger,
