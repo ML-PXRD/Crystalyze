@@ -23,6 +23,7 @@ from pymatgen.core.structure import Structure
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
+
 #import Batch
 from torch_geometric.data import Batch
 xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
@@ -34,7 +35,6 @@ def build_mlp(in_dim, hidden_dim, fc_num_layers, out_dim):
         mods += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU()]
     mods += [nn.Linear(hidden_dim, out_dim)]
     return nn.Sequential(*mods)
-
 
 class BaseModule(pl.LightningModule):
     def __init__(self, *args, **kwargs) -> None:
@@ -363,11 +363,7 @@ class CDVAE(BaseModule):
         
         if self.dropout_rate > 0.0 and not testing:
             z = F.dropout(z, p=self.dropout_rate, training=self.training)
-        else:
-            print("dropout is not being used")
 
-        # print("z is of shape: {}".format(z.shape))
-        # print("z is {}".format(z))
         
         return mu, log_var, z
 

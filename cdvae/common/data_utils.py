@@ -22,6 +22,8 @@ import ast
 #import the random function library
 import random
 
+import time
+
 # Tensor of unit cells. Assumes 27 cells in -1, 0, 1 offsets in the x and y dimensions
 # Note that differing from OCP, we have 27 offsets here because we are in 3D
 OFFSET_LIST = [
@@ -665,100 +667,91 @@ def get_scaler_from_data_list(data_list, key):
 
 #     return numbers
 
+def num_atoms_restriction(df, max_num_atoms):
+    atomic_num_list = df['atomic_numbers'].apply(ast.literal_eval)
+    num_atoms = [len(x) for x in atomic_num_list]
+    len_mask = [x<=max_num_atoms for x in num_atoms]
+    df = df[len_mask]
+    return df
+
+def source_restriction(df, source): 
+    if source == "mp_20": 
+        try: 
+            mp_20_df = df[df['material_id'].str.startswith('m')]
+            return mp_20_df
+        except:
+            print("filter failed")
+            return df
+    else:
+        return df
 
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                train_fraction, 
                prop_list):
+    
     df = pd.read_csv(input_file)
-    n = len(df)*train_fraction
-    #round n
-    n = round(n)
 
-    #sample n rows from the dataframe
+    #impose a restriction on the number of atoms in the compounds being read in 
+    #note that this is seperate from the parameter written by Xie - that enforces bounds on the model
+    #this limits the data that's being used. 
+    max_num_atoms = 20
+    df = num_atoms_restriction(df, max_num_atoms)
+    print("using {} rows after imposing a restriction on the number of atoms".format(len(df)))
+
+    #impose a restriction on the source of the data (used to held deal with combined datasets)
+    source = "any"
+    df = source_restriction(df, source)
+    print("using {} rows after imposing a restriction on the source".format(len(df)))
+
+    #allow for subsectioning of training data - used for data size impact studies 
+    n = round(len(df)*train_fraction)
     df = df.sample(n=n)
     print("using {} rows given a train_fraction of {}".format(n, train_fraction))
 
     #read in the graph pt file 
     pt_file_path = input_file[:-4] + ".pt"
+    #this will contain the graph data for all the compounds
     graph_dict = torch.load(pt_file_path)
-    graph_list = list(graph_dict.values())
 
-    def process_one(row, niggli, primitive, graph_method, prop_list, graph_list):
-        crystal_str = row['cif']
+    start = time.time()
+    features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
 
-        extra_feature_names = ['xrd_peak_intensities', 'xrd_peak_locations', 'atomic_numbers', 'disc_sim_xrd']
-        extra_feature_data = []
+    for feature in features: 
+        df[feature] = df[feature].apply(ast.literal_eval)
 
-        for feature in extra_feature_names:
-            
-            #some extra processing for disc_sim_xrd
-            if feature == 'disc_sim_xrd':
-                s = row[feature][1:-1]
+    #disc sim xrd and atomic numbers need special additional steps
+    df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
+    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(set(x)))
+    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
 
-                # Split the string based on spaces
-                row[feature] = [float(val) for val in s.split() if val]
-                feature_val_rough = row[feature]
-            else:
+    features.append("disc_sim_xrd")
+    features.append("atomic_numbers")
 
-                #use ast to convert string to list
-                feature_val_rough = ast.literal_eval(row[feature])
+    for feature in features:
+        df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
 
-            #if the feature is atomic_numbers, get only the unique values and randomize
-            if feature == 'atomic_numbers':
-                # get the unique values
-                feature_val_rough = list(set(feature_val_rough))
-                # randomize the order 
-                random.shuffle(feature_val_rough)
+    xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
+    xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
+    atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
+    disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
 
-            #ensure that the vector is 256 long with 0 padding
-            if len(feature_val_rough) < 256:
-                feature_val_refined = feature_val_rough + [0]*(256-len(feature_val_rough))
-            else:
-                feature_val_refined = feature_val_rough[:256]
+    #properties stuff, not super important for xrd purposes 
+    prop_dictionary = {}
+    for prop in prop_list:
+        prop_dictionary[prop] = df[prop].values.astype(np.float32)
     
-            #create tensors for everything 
-            feature_tensor = torch.tensor(feature_val_refined)
-            extra_feature_data.append(feature_tensor)
-        # print(extra_feature_data)
-        # crystal = build_crystal(
-        #     crystal_str, niggli=niggli, primitive=primitive)
-        # graph_arrays = build_crystal_graph(crystal, graph_method)
-        # graph_arrays = graph_dict[(row['material_id'])]
-        properties = {k: row[k] for k in prop_list if k in row.keys()}
-        result_dict = {
-            'mp_id': row['material_id'],
-            'cif': crystal_str,
-            # 'graph_arrays': graph_arrays,
-            'xrd_intensities': extra_feature_data[0],
-            'xrd_locations': extra_feature_data[1],
-            'atomic_species': extra_feature_data[2],
-            'disc_sim_xrd': extra_feature_data[3],
-        }
-        # print(result_dict)
-        result_dict.update(properties)
-        return result_dict
-    # print(df)
-
-    input_rows = [df.iloc[idx] for idx in range(len(df))]
-
-    unordered_results = p_umap(
-        process_one,
-        input_rows,
-        [niggli] * len(df),
-        [primitive] * len(df),
-        [graph_method] * len(df),
-        [prop_list] * len(df),
-        graph_list,
-        num_cpus=num_workers,)
+    #merge everything into a list of dictionaries
+    ordered_results = []
+    for i in range(len(df)):
+        materials_id = df['material_id'].iloc[i]
+        #all list orders except for graph_arrays should have bene preserved 
+        ordered_results.append({'xrd_intensities': xrd_intensities[i], 'xrd_locations': xrd_locations[i], 
+                        'atomic_species': atomic_species[i], 'disc_sim_xrd': disc_sim_xrd[i], 'graph_arrays': graph_dict[materials_id]})
+        for prop in prop_list:
+            ordered_results[i][prop] = prop_dictionary[prop][i]
     
-    mpid_to_results = {result['mp_id']: result for result in unordered_results}
-    ordered_results = [mpid_to_results[df.iloc[idx]['material_id']]
-                       for idx in range(len(df))]
-    
-    #add the graph data to ordered_reults
-    #note that this works because graph data is in the same order as the input_rows
-    for idx, result in enumerate(ordered_results):
-        result["graph_arrays"] = graph_list[idx]
+    end = time.time()
+    print("time taken: {}".format(end-start))
 
     return ordered_results
 

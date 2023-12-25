@@ -16,6 +16,11 @@ pl_trainer:
   gradient_clip_algorithm: value
   profiler: simple
 
+#best model so far
+#/home/gridsan/tmackey/hydra/singlerun/2023-10-29/no_encode_intensity_concat_comp_concat_neg_mask_mp_20/epoch=519-step=55119.ckpt
+#/home/gridsan/tmackey/hydra/singlerun/2023-12-22/ogCDVAE_mp_20_graph_preloading_50u
+#/home/gridsan/tmackey/hydra/singlerun/2023-12-23/ogCDVAE_mp_20_dm_graph_preloading_V3
+checkpoint_path: null
 
 monitor_metric: 'val_loss'
 monitor_metric_mode: 'min'

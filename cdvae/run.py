@@ -134,14 +134,44 @@ def run(cfg: DictConfig) -> None:
     yaml_conf: str = OmegaConf.to_yaml(cfg=cfg)
     (hydra_dir / "hparams.yaml").write_text(yaml_conf)
 
-    # Load checkpoint (if exist)
-    ckpts = list(hydra_dir.glob('*.ckpt'))
-    if len(ckpts) > 0:
-        ckpt_epochs = np.array([int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts])
-        ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
-        hydra.utils.log.info(f"found checkpoint: {ckpt}")
+    #manual checkpoint specification 
+    import os
+    import glob
+
+    # Get the folder path from the configuration
+    folder_path = cfg.train.checkpoint_path
+    
+    if folder_path != None:
+        print("folder path is ", folder_path)
+        # Find all 'chkpt' files in the folder
+        chkpt_files = glob.glob(os.path.join(folder_path, '*.chkpt'))
+    else: 
+        chkpt_files = None
+
+    # Check if there are any checkpoint files
+    if chkpt_files:
+        # Find the most recently modified file
+        latest_chkpt = max(chkpt_files, key=os.path.getmtime)
     else:
-        ckpt = None
+        latest_chkpt = None
+
+    # Assign to ckpt
+    ckpt = latest_chkpt
+
+    if ckpt:
+        hydra.utils.log.info(f"Using specified checkpoint: {ckpt}")
+    else:
+        hydra.utils.log.info("No checkpoint specified, starting training from scratch")
+
+    if not ckpt:
+        # Load checkpoint (if exist)
+        ckpts = list(hydra_dir.glob('*.ckpt'))
+        if len(ckpts) > 0:
+            ckpt_epochs = np.array([int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts])
+            ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
+            hydra.utils.log.info(f"found checkpoint: {ckpt}")
+        else:
+            ckpt = None
           
     hydra.utils.log.info("Instantiating the Trainer")
     trainer = pl.Trainer(
