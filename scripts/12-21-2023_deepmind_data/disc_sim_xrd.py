@@ -17,7 +17,14 @@ except:
 print("Worker number: ", worker_num)
 
 num_splits = 100
-data_dir = '/home/gridsan/tmackey/materials_discovery/data/actually_full_gnome_data/'
+
+try: 
+    print('using data_dir', str(sys.argv[2]))
+    data_dir = str(sys.argv[2])
+except:
+    print("using default data_dir /home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/")
+    data_dir = '/home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/'
+
 
 #load in the data 
 train_df = pd.read_csv(data_dir + 'train_xrd.csv') 

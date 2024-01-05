@@ -25,5 +25,16 @@ if [ "$3" == "True" ]; then
 fi
 
 echo "Second argument is $2"
-python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2 --save_traj True $FORCE_ATOM_TYPES_FLAG --num_evals $4 
-python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True
+
+#check to see if $5 is empty
+if [ -z "$5" ]; then
+  echo "\$5 is empty"
+  python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2 --save_traj True $FORCE_ATOM_TYPES_FLAG --num_evals $4
+  python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True
+  exit
+else
+  echo "\$5 is NOT empty"
+  python scripts/evaluate.py --model_path $1 --tasks recon --force_num_atoms --num_batches $2 --save_traj True $FORCE_ATOM_TYPES_FLAG --num_evals $4 --test_set_override $5 --label $5
+  python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True --label $5
+fi
+

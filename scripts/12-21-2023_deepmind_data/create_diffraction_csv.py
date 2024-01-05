@@ -19,8 +19,12 @@ num_splits = 100
 print("worker_num", worker_num)
 print("num_splits", num_splits)
 
-
-data_dir = '/home/gridsan/tmackey/materials_discovery/data/actually_full_gnome_data/'
+try: 
+    print('using data_dir', str(sys.argv[2]))
+    data_dir = str(sys.argv[2])
+except:
+    print("using default data_dir /home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/")
+    data_dir = '/home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/'
 
 #load in the data 
 train_df = pd.read_csv(data_dir + 'train.csv')

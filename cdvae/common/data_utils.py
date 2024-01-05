@@ -21,7 +21,7 @@ from p_tqdm import p_umap
 import ast
 #import the random function library
 import random
-
+import os 
 import time
 
 # Tensor of unit cells. Assumes 27 cells in -1, 0, 1 offsets in the x and y dimensions
@@ -674,6 +674,29 @@ def num_atoms_restriction(df, max_num_atoms):
     df = df[len_mask]
     return df
 
+def unflatten_atom_types(num_atoms, atom_types):
+    """
+    Converts a flattened list of atom types into a list of lists based on num_atoms.
+
+    :param num_atoms: A list or tensor of the number of atoms in each molecule.
+    :param atom_types: A flattened list or tensor of atom types.
+    :return: A list of lists, where each sublist contains atom types for each molecule.
+    """
+    # Convert tensors to lists if they are not already
+    if not isinstance(num_atoms, list):
+        num_atoms = num_atoms.tolist()
+    if not isinstance(atom_types, list):
+        atom_types = atom_types.tolist()
+
+    result = []
+    start = 0
+    for count in num_atoms:
+        end = start + count
+        result.append(str(atom_types[start:end]))
+        start = end
+
+    return result
+
 def source_restriction(df, source): 
     if source == "mp_20": 
         try: 
@@ -685,73 +708,140 @@ def source_restriction(df, source):
     else:
         return df
 
+def compound_restriction(df, name = "batch_82_0_20"): 
+    if name == "batch_82_0_20": 
+        print("filtering with batch_82_0_20")
+        batch_82_0_20 = torch.load('/home/gridsan/tmackey/cdvae/data/mp_20_dm/train_errors/batch_82_0_20.pt')
+        num_atoms = batch_82_0_20[0].num_atoms.cpu()
+        atom_types = batch_82_0_20[0].atom_types.cpu()
+
+        unflattened_atom_types = unflatten_atom_types(num_atoms, atom_types)
+        print("unflattened_atom_types: ", unflattened_atom_types)
+        filtered_df = df[~df['atomic_numbers'].isin(unflattened_atom_types)]
+        
+        return filtered_df
+    else: 
+        print("no filter")
+        return df
+
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                train_fraction, 
-               prop_list):
+               prop_list, max_num_atoms = 20, source = "any"):
+
+    print("constraints are max_num_atoms = {} and source = {}".format(max_num_atoms, source))
+
+    df_file_name = input_file[:-4] + "_" + str(max_num_atoms) + "_" + source + ".csv"
+    graph_file_name = input_file[:-4] + "_" + str(max_num_atoms) + "_" + source + ".pt"
+
+    #look for the file in the directory
+    if os.path.isfile(df_file_name) and os.path.isfile(graph_file_name):
+        print("using existing csv file ", df_file_name)
+        df = pd.read_csv(df_file_name)
+
+        print("using existing graph file ", graph_file_name)
+        graph_dict = torch.load(graph_file_name)
     
-    df = pd.read_csv(input_file)
+    else:
 
-    #impose a restriction on the number of atoms in the compounds being read in 
-    #note that this is seperate from the parameter written by Xie - that enforces bounds on the model
-    #this limits the data that's being used. 
-    max_num_atoms = 20
-    df = num_atoms_restriction(df, max_num_atoms)
-    print("using {} rows after imposing a restriction on the number of atoms".format(len(df)))
+        print("creating new csv file ", df_file_name)
+        df = pd.read_csv(input_file)
 
-    #impose a restriction on the source of the data (used to held deal with combined datasets)
-    source = "any"
-    df = source_restriction(df, source)
-    print("using {} rows after imposing a restriction on the source".format(len(df)))
+        df = num_atoms_restriction(df, max_num_atoms)
+        print("using {} rows after imposing a restriction on the number of atoms".format(len(df)))
+
+        df = source_restriction(df, source)
+        print("using {} rows after imposing a restriction on the source".format(len(df)))
+
+        df.to_csv(df_file_name)
+        print("saved dataframe to csv file ", df_file_name)
+
+        pt_file_path = input_file[:-4] + ".pt"
+        graph_dict = torch.load(pt_file_path)
+
+        #make a new dictionary with only entries that have keys in the material_id column of the dataframe
+        sub_graph_dict = {key: graph_dict[key] for key in df['material_id'].tolist()}
+
+        #save the new dictionary to a pt file
+        torch.save(sub_graph_dict, graph_file_name)
+        print("saved graph dictionary to pt file ", graph_file_name)
+
+    #impose a restriction eliminating a few compounds that are causing problems
+    compounds_to_remove = ""
+    df = compound_restriction(df, name = compounds_to_remove)
 
     #allow for subsectioning of training data - used for data size impact studies 
-    n = round(len(df)*train_fraction)
-    df = df.sample(n=n)
+    if train_fraction < 1: # if train_fraction is 1 and the code below is used, it'll shuffle
+        n = round(len(df)*train_fraction)
+        df = df.sample(n=n)
     print("using {} rows given a train_fraction of {}".format(n, train_fraction))
-
-    #read in the graph pt file 
-    pt_file_path = input_file[:-4] + ".pt"
-    #this will contain the graph data for all the compounds
-    graph_dict = torch.load(pt_file_path)
-
-    start = time.time()
-    features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
-
-    for feature in features: 
-        df[feature] = df[feature].apply(ast.literal_eval)
-
-    #disc sim xrd and atomic numbers need special additional steps
-    df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
-    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(set(x)))
-    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
-
-    features.append("disc_sim_xrd")
-    features.append("atomic_numbers")
-
-    for feature in features:
-        df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
-
-    xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
-    xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
-    atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
-    disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
-
+    
     #properties stuff, not super important for xrd purposes 
     prop_dictionary = {}
     for prop in prop_list:
         prop_dictionary[prop] = df[prop].values.astype(np.float32)
+
+    try: 
+        start = time.time()
+        xrd_peak_intensities_dict = torch.load(input_file[:-4] + "_xrd_peak_intensities_dict.pt")
+        xrd_peak_locations_dict = torch.load(input_file[:-4] + "_xrd_peak_locations_dict.pt")
+        atomic_species_dict = torch.load(input_file[:-4] + "_atomic_numbers_dict.pt")
+        disc_sim_xrd_dict = torch.load(input_file[:-4] + "_disc_sim_xrd_dict.pt")
+        
+        #merge everything into a list of dictionaries
+        ordered_results = []
+        for i in range(len(df)):
+            materials_id = df['material_id'].iloc[i]
+            #all list orders except for graph_arrays should have bene preserved 
+            ordered_results.append({'xrd_intensities': xrd_peak_intensities_dict[materials_id][0],
+                                    'xrd_locations': xrd_peak_locations_dict[materials_id][0], 
+                                    'atomic_species': atomic_species_dict[materials_id][0], 
+                                    'disc_sim_xrd': disc_sim_xrd_dict[materials_id][0], 
+                                    'graph_arrays': graph_dict[materials_id]})
+            for prop in prop_list:
+                ordered_results[i][prop] = prop_dictionary[prop][i]
+        
+        end = time.time()
+        print("xrd, atomic species, and disc sim xrd dicts preloaded")
+        print("time taken: {}".format(end-start))
     
-    #merge everything into a list of dictionaries
-    ordered_results = []
-    for i in range(len(df)):
-        materials_id = df['material_id'].iloc[i]
-        #all list orders except for graph_arrays should have bene preserved 
-        ordered_results.append({'xrd_intensities': xrd_intensities[i], 'xrd_locations': xrd_locations[i], 
-                        'atomic_species': atomic_species[i], 'disc_sim_xrd': disc_sim_xrd[i], 'graph_arrays': graph_dict[materials_id]})
-        for prop in prop_list:
-            ordered_results[i][prop] = prop_dictionary[prop][i]
+    #the following is the old code for getting the xrd information from the csv, will take 2-10 extra minutes 
+    except Exception as e: 
+        print(e) 
+        
+        start = time.time()
+        features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
+
+        for feature in features: 
+            df[feature] = df[feature].apply(ast.literal_eval)
+
+        #disc sim xrd and atomic numbers need special additional steps
+        df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
+        df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(set(x)))
+        df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
+
+        features.append("disc_sim_xrd")
+        features.append("atomic_numbers")
+
+        for feature in features:
+            df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
+
+        xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
+        xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
+        atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
+        disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
+
+        #merge everything into a list of dictionaries
+        ordered_results = []
+        for i in range(len(df)):
+            materials_id = df['material_id'].iloc[i]
+            #all list orders except for graph_arrays should have bene preserved 
+            ordered_results.append({'xrd_intensities': xrd_intensities[i], 'xrd_locations': xrd_locations[i], 
+                            'atomic_species': atomic_species[i], 'disc_sim_xrd': disc_sim_xrd[i], 'graph_arrays': graph_dict[materials_id]})
+            for prop in prop_list:
+                ordered_results[i][prop] = prop_dictionary[prop][i]
     
-    end = time.time()
-    print("time taken: {}".format(end-start))
+        end = time.time()
+        print("time taken: {}".format(end-start))
 
     return ordered_results
 

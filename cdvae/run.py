@@ -1,3 +1,7 @@
+#imported by Tsach 
+import os
+import glob
+
 from pathlib import Path
 from typing import List
 
@@ -17,7 +21,6 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 
 from cdvae.common.utils import log_hyperparameters, PROJECT_ROOT
-
 
 def build_callbacks(cfg: DictConfig) -> List[Callback]:
     callbacks: List[Callback] = []
@@ -102,6 +105,9 @@ def run(cfg: DictConfig) -> None:
         _recursive_=False,
     )
 
+    #move the model to the relevant device
+
+
     # Pass scaler from datamodule to model
     hydra.utils.log.info(f"Passing scaler from datamodule to model <{datamodule.scaler}>")
     model.lattice_scaler = datamodule.lattice_scaler.copy()
@@ -134,9 +140,6 @@ def run(cfg: DictConfig) -> None:
     yaml_conf: str = OmegaConf.to_yaml(cfg=cfg)
     (hydra_dir / "hparams.yaml").write_text(yaml_conf)
 
-    #manual checkpoint specification 
-    import os
-    import glob
 
     # Get the folder path from the configuration
     folder_path = cfg.train.checkpoint_path
@@ -144,24 +147,43 @@ def run(cfg: DictConfig) -> None:
     if folder_path != None:
         print("folder path is ", folder_path)
         # Find all 'chkpt' files in the folder
-        chkpt_files = glob.glob(os.path.join(folder_path, '*.chkpt'))
+        ckpt_files = glob.glob(os.path.join(folder_path, '*.ckpt'))
+        print("chkpt files are ", ckpt_files)
     else: 
-        chkpt_files = None
+        ckpt_files = None
 
     # Check if there are any checkpoint files
-    if chkpt_files:
+    if ckpt_files:
         # Find the most recently modified file
-        latest_chkpt = max(chkpt_files, key=os.path.getmtime)
+        latest_ckpt = max(ckpt_files, key=os.path.getmtime)
+        print("latest checkpoint is ", latest_ckpt)
     else:
-        latest_chkpt = None
+        latest_ckpt = None
 
     # Assign to ckpt
-    ckpt = latest_chkpt
+    ckpt = latest_ckpt
 
     if ckpt:
-        hydra.utils.log.info(f"Using specified checkpoint: {ckpt}")
+        # Load the checkpoint
+        checkpoint = torch.load(ckpt)
+
+        if cfg.train.checkpoint_epoch is not None:
+            # Reset the epoch count if it exists in the checkpoint
+            if 'epoch' in checkpoint:
+                print("original epoch is ", checkpoint['epoch'])
+                checkpoint['epoch'] = cfg.train.checkpoint_epoch
+            elif 'global_step' in checkpoint:  # For PyTorch Lightning or similar frameworks
+                print("no epoch in checkpoint, but global step is ", checkpoint['global_step'])
+                checkpoint['global_step'] = cfg.train.checkpoint_epoch*len(datamodule.train_dataloader())
+            else:
+                raise ValueError("Could not find epoch or global_step in checkpoint.")
+
+        # Save the modified checkpoint
+        torch.save(checkpoint, ckpt)
+        hydra.utils.log.info(f"Checkpoint epoch reset and loaded from: {ckpt}")
     else:
         hydra.utils.log.info("No checkpoint specified, starting training from scratch")
+
 
     if not ckpt:
         # Load checkpoint (if exist)
@@ -181,6 +203,9 @@ def run(cfg: DictConfig) -> None:
         deterministic=cfg.train.deterministic,
         check_val_every_n_epoch=cfg.logging.val_check_interval,
         progress_bar_refresh_rate=cfg.logging.progress_bar_refresh_rate,
+        # accelerator="ddp",
+        # gpus=1,
+        # num_nodes=2,
         resume_from_checkpoint=ckpt,
         **cfg.train.pl_trainer,
     )

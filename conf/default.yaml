@@ -1,4 +1,5 @@
 expname: test
+max_num_atoms: 20 
 
 # metadata specialised for each experiment
 core:

@@ -237,7 +237,7 @@ def main(args):
     model_path = Path(args.model_path)
     model, test_loader, cfg = load_model(
         model_path, load_data=('recon' in args.tasks) or
-        ('opt' in args.tasks and args.start_from == 'data'))
+        ('opt' in args.tasks and args.start_from == 'data'), test_set_override=args.test_set_override)
     print(test_loader)
     ld_kwargs = SimpleNamespace(n_step_each=args.n_step_each,
                                 step_lr=args.step_lr,
@@ -339,7 +339,8 @@ if __name__ == '__main__':
 
     #number of batches to evaluate
     parser.add_argument('--num_batches', default=36, type=int)
-
+    parser.add_argument('--test_set_override', default=None, type=str)
+    
     args = parser.parse_args()
 
     main(args)

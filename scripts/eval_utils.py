@@ -52,9 +52,14 @@ def load_config(model_path):
     return cfg
 
 
-def load_model(model_path, load_data=False, testing=True):
+def load_model(model_path, load_data=False, testing=True, test_set_override=None):
     with initialize_config_dir(str(model_path)):
-        cfg = compose(config_name='hparams')
+        if test_set_override is not None:
+            cfg = compose(config_name='hparams', overrides=[f"data.root_path=/home/gridsan/tmackey/cdvae/data/{test_set_override}",
+                                                            f"data.eval_model_name={test_set_override}"])
+            print("overriding data with ", test_set_override)
+        else:
+            cfg = compose(config_name='hparams')
         model = hydra.utils.instantiate(
             cfg.model,
             optim=cfg.optim,

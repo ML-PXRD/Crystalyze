@@ -39,7 +39,14 @@ try:
     worker_num = int(sys.argv[1])
 except: 
     worker_num = 0
-data_dir = '/home/gridsan/tmackey/materials_discovery/data/actually_full_gnome_data/'
+
+try: 
+    print('using data_dir', str(sys.argv[2]))
+    data_dir = str(sys.argv[2])
+except:
+    print("using default data_dir /home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/")
+    data_dir = '/home/gridsan/tmackey/materials_discovery/data/mp_20_for_validation/'
+
 
 #load in the data 
 train_df = pd.read_csv(data_dir + 'train_xrd.csv')

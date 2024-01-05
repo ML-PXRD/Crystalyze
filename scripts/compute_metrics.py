@@ -129,8 +129,12 @@ class RecEval(object):
                     pred_formula = pred_structure.formula.replace(" ", "_")  # Replace spaces with underscores
                     gt_formula = gt_structure.formula.replace(" ", "_")  # Replace spaces with underscores
 
-                    pred_filename = f"pred_{pred_formula}.cif" 
-                    gt_filename = f"gt_{gt_formula}.cif"
+                    if args.label == '':
+                        pred_filename = f"pred_{pred_formula}.cif" 
+                        gt_filename = f"gt_{gt_formula}.cif"
+                    else:
+                        pred_filename = f"pred_{pred_formula}_{args.label}.cif" 
+                        gt_filename = f"gt_{gt_formula}_{args.label}.cif"
 
                     pred_filepath = os.path.join(args.root_path, pred_filename)
                     gt_filepath = os.path.join(args.root_path, gt_filename)
@@ -375,7 +379,7 @@ def main(args):
         rec_evaluator = RecEval(pred_crys, gt_crys)
         recon_metrics, results_df = rec_evaluator.get_metrics()
         #save the results dataframe
-        results_df.to_csv(os.path.join(args.root_path, "results_df.csv"))
+        results_df.to_csv(os.path.join(args.root_path, f"results_df_{args.label}.csv"))
         all_metrics.update(recon_metrics)
 
     if 'gen' in args.tasks:

@@ -18,6 +18,8 @@ class CrystDataset(Dataset):
                  graph_method: ValueNode, preprocess_workers: ValueNode,
                  lattice_scale_method: ValueNode, 
                  train_fraction: ValueNode = 1,
+                 max_num_atoms: ValueNode = 20,
+                 source: ValueNode = "any",
                  **kwargs):
         super().__init__()
         self.path = path
@@ -29,6 +31,8 @@ class CrystDataset(Dataset):
         self.graph_method = graph_method
         self.lattice_scale_method = lattice_scale_method
         self.train_fraction = train_fraction
+        self.max_num_atoms = max_num_atoms
+        self.source = source
 
         self.cached_data = preprocess(
             self.path,
@@ -37,7 +41,9 @@ class CrystDataset(Dataset):
             primitive=self.primitive,
             graph_method=self.graph_method,
             train_fraction=self.train_fraction,
-            prop_list=[prop])
+            prop_list=[prop], 
+            max_num_atoms=self.max_num_atoms,
+            source = self.source)
 
         add_scaled_lattice_prop(self.cached_data, lattice_scale_method)
         self.lattice_scaler = None

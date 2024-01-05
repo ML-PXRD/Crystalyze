@@ -24,6 +24,8 @@ from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 
+import os
+
 #import Batch
 from torch_geometric.data import Batch
 xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
@@ -166,6 +168,8 @@ class CDVAE(BaseModule):
         self.decoder_dropout = getattr(self.hparams, 'decoder_dropout', 0.0)
         self.use_differentiable_diffraction_loss = getattr(self.hparams, 'use_differentiable_diffraction_loss', False)
         self.differentiable_diffraction_weight = getattr(self.hparams, 'differentiable_diffraction_weight', 0.0)
+        self.max_num_atoms = getattr(self.hparams, 'max_num_atoms', 20)
+        self.job_num = os.environ.get('SLURM_JOB_ID', '00000')   #get the job number from the environment variable
 
         #diffraction pattern parameters
         self.wavelength = getattr(self.hparams, 'wavelength', 1.5406)
@@ -287,8 +291,8 @@ class CDVAE(BaseModule):
             z = self.reparameterize(mu, log_var)
 
         else:
-            mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
-            log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=xrd_loc.device)
+            mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+            log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
             z = xrd_loc
 
             if self.use_discrete_simulated_xrd: 
@@ -304,7 +308,7 @@ class CDVAE(BaseModule):
                 else:
                     print("not using elemental composition")
                     #use 56 zeros as the atom_spec
-                    atom_spec_sliced = torch.zeros((atom_spec.shape[0], 56), device=atom_spec.device)
+                    atom_spec_sliced = torch.zeros((atom_spec.shape[0], 56), device=self.device)
                     concat_discrete_simulated_xrd_atom_spec = torch.cat((discrete_simulated_xrd_sliced, atom_spec_sliced), dim=1)
                 #make it a tensor of floats
                 concat_discrete_simulated_xrd_atom_spec = concat_discrete_simulated_xrd_atom_spec.float()
@@ -406,7 +410,7 @@ class CDVAE(BaseModule):
             """
 
             # Create a range tensor and repeat it as before
-            range_tensor = torch.arange(len(num_atoms), device='cuda:0')
+            range_tensor = torch.arange(len(num_atoms), device=self.device)
             crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
 
             # Convert atom_types into a mask
@@ -896,39 +900,71 @@ class CDVAE(BaseModule):
 
         # print("kld_loss: ", kld_loss)
         return kld_loss
+
+    def error_tracking(self, batch, batch_idx, name = "train"): 
+
+        error_dir = f"/home/gridsan/tmackey/cdvae/data/mp_20_dm/{name}_errors/"
+
+        # Save the batch data
+        file_name = f"batch_{batch_idx}_{self.current_epoch}_{self.max_num_atoms}_{self.job_num}.pt"
+        file_path = os.path.join(error_dir, file_name)
+        torch.save(batch, file_path)
+
+        print("Saved batch data to {}".format(file_path))
     
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        teacher_forcing = (
-            self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
-        outputs = self(batch, teacher_forcing, training=True)
-        log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
-        self.log_dict(
-            log_dict,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        return loss
+        try: 
+            teacher_forcing = (
+                self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
+            outputs = self(batch, teacher_forcing, training=True)
+            log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
+            if loss < 100000000: 
+                self.log_dict(
+                    log_dict,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=True,
+                )
+                return loss
+            else:
+                print("the loss is too high, skipping this batch")
+                self.error_tracking(batch, batch_idx, name = "train_large_loss")
+                return None
+        except Exception as e: 
+            print(f"An error occurred during training at batch {batch_idx}: {e}")
+            self.error_tracking(batch, batch_idx, name = "train")
+            return None  # Returning None will skip this batch
+
 
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        outputs = self(batch, teacher_forcing=False, training=False)
-        log_dict, loss = self.compute_stats(batch, outputs, prefix='val')
-        self.log_dict(
-            log_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        return loss
+        try: 
+            outputs = self(batch, teacher_forcing=False, training=False)
+            log_dict, loss = self.compute_stats(batch, outputs, prefix='val')
+            self.log_dict(
+                log_dict,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            return loss
+        except Exception as e: 
+            print(f"An error occurred during validation at batch {batch_idx}: {e}")
+            self.error_tracking(batch, batch_idx, name = "val")
+            return None
 
     def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        outputs = self(batch, teacher_forcing=False, training=False)
-        log_dict, loss = self.compute_stats(batch, outputs, prefix='test')
-        self.log_dict(
-            log_dict,
-        )
-        return loss
-
+        try: 
+            outputs = self(batch, teacher_forcing=False, training=False)
+            log_dict, loss = self.compute_stats(batch, outputs, prefix='test')
+            self.log_dict(
+                log_dict,
+            )
+            return loss
+        except Exception as e:
+            print(f"An error occurred during testing at batch {batch_idx}: {e}")
+            self.error_tracking(batch, batch_idx, name = "test")
+            return None
+        
     def compute_stats(self, batch, outputs, prefix):
         batch_reserve = batch
         xrd_int = batch_reserve[1]
