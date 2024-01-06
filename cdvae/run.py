@@ -203,7 +203,7 @@ def run(cfg: DictConfig) -> None:
         deterministic=cfg.train.deterministic,
         check_val_every_n_epoch=cfg.logging.val_check_interval,
         progress_bar_refresh_rate=cfg.logging.progress_bar_refresh_rate,
-        # accelerator="ddp",
+        accelerator="ddp",
         # gpus=1,
         # num_nodes=2,
         resume_from_checkpoint=ckpt,

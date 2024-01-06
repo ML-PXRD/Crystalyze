@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:volta:1
+#SBATCH --gres=gpu:volta:2
 #SBATCH --ntasks=18
 #SBATCH --mem=45000
 #SBATCH --time=96:00:00

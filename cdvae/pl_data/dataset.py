@@ -63,6 +63,7 @@ class CrystDataset(Dataset):
         xrd_locations = data_dict['xrd_locations']
         atomic_species = data_dict['atomic_species']
         disc_sim_xrd = data_dict['disc_sim_xrd']
+        pv_xrd = data_dict['pv_xrd']
         # print(xrd_intensities)
         # print(xrd_locations)
         # print(atomic_species)
@@ -87,7 +88,7 @@ class CrystDataset(Dataset):
         # print(xrd_locations)
         # print(atomic_species)
         # print(disc_sim_xrd)
-        return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd
+        return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd, pv_xrd
 
     def __repr__(self) -> str:
         return f"CrystDataset({self.name=}, {self.path=})"

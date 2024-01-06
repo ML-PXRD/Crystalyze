@@ -56,6 +56,46 @@ class BaseModule(pl.LightningModule):
         return {"optimizer": opt, "lr_scheduler": scheduler, "monitor": "val_loss"}
 
 
+# Define the neural network with MLP at the end
+class SimpleConvNet(nn.Module):
+    def __init__(self, in_channels, output_dim):
+        super(SimpleConvNet, self).__init__()
+        self.conv_layers = nn.Sequential(
+            nn.Conv1d(in_channels, 80, kernel_size = 100, stride=5),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Conv1d(80, 80, 50, stride=5),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Conv1d(80, 80, 25, stride=2),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+        )
+        self.flatten = nn.Flatten()
+        # Calculate flattened_size dynamically
+        self.flattened_size = self._get_flattened_size(input_shape=(1, in_channels, 8192))
+        self.MLP = nn.Sequential(
+            nn.Linear(self.flattened_size, 2300),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(2300, 1150),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(1150, output_dim)
+        )
+
+    def _get_flattened_size(self, input_shape):
+        dummy_input = torch.zeros(input_shape)
+        with torch.no_grad():
+            dummy_output = self.conv_layers(dummy_input)
+        return int(np.prod(dummy_output.shape))
+
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = self.flatten(x)
+        x = self.MLP(x)
+        return x
+
 class CrystGNN_Supervise(BaseModule):
     """
     GNN model for fitting the supervised objectives for crystals.
@@ -171,6 +211,22 @@ class CDVAE(BaseModule):
         self.max_num_atoms = getattr(self.hparams, 'max_num_atoms', 20)
         self.job_num = os.environ.get('SLURM_JOB_ID', '00000')   #get the job number from the environment variable
 
+        self.use_psuedo_voigt = getattr(self.hparams, 'use_psuedo_voigt', False)
+        self.pretrained_weights_path = "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/12-17-2023_peak_convnet/model_final.pth"
+        self.simple_conv_net = SimpleConvNet(in_channels=1, output_dim=self.hparams.latent_dim)
+
+        if os.path.exists(self.pretrained_weights_path):
+            pretrained_weights = torch.load(self.pretrained_weights_path)
+            self.simple_conv_net.load_state_dict(pretrained_weights)
+        else:
+            print(f"Pretrained weights file not found at {self.pretrained_weights_path}")
+
+        for param in self.simple_conv_net.parameters():
+            param.requires_grad = True
+
+        if torch.cuda.is_available():
+            self.simple_conv_net = self.simple_conv_net.to(self.device)
+        
         #diffraction pattern parameters
         self.wavelength = getattr(self.hparams, 'wavelength', 1.5406)
         self.q_max = getattr(self.hparams, 'q_max', 8)
@@ -271,7 +327,7 @@ class CDVAE(BaseModule):
         z = self.reparameterize(mu, log_var)
         return mu, log_var, z
     
-    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False):
+    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False, pv_xrd = None):
         """
         encode crystal structures to latents.
         """
@@ -289,6 +345,13 @@ class CDVAE(BaseModule):
             mu = self.fc_mu(hidden)
             log_var = self.fc_var(hidden)
             z = self.reparameterize(mu, log_var)
+
+        elif self.use_psuedo_voigt:
+            pv_xrd_processed = self.simple_conv_net(pv_xrd)
+            z = pv_xrd_processed
+            mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+            log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+            return mu, log_var, z
 
         else:
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
@@ -541,10 +604,14 @@ class CDVAE(BaseModule):
         xrd_loc = batch_reserve[2]
         atom_spec = batch_reserve[3]
         disc_sim_xrd = batch_reserve[4]
+        pv_xrd = batch_reserve[5]
+        # print("the pv_xrd is: {}".format(pv_xrd))
         # print("the disc sim xrd is: {}".format(disc_sim_xrd))
         batch = batch[0]
 
-        mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd)
+        mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec,
+                                      discrete_simulated_xrd = disc_sim_xrd, 
+                                      pv_xrd = pv_xrd)
         kld_loss = self.kld_loss(mu, log_var)
 
         if self.use_cond_kld:
