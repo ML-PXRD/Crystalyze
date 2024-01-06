@@ -18,8 +18,9 @@ def new_dataloader_batch_processor(batch):
     atom_spec = batch_reserve[3]
     batch = batch[0]
     disc_sim_xrd = batch_reserve[4]
+    pv_xrd = batch_reserve[5]
 
-    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd
+    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd
 
 def reconstructon(loader, model, ld_kwargs, num_evals,
                   force_num_atoms=False, force_atom_types=False, down_sample_traj_step=1, num_batches=15):
@@ -37,7 +38,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
     for idx, batch in enumerate(loader):
         if idx < num_batches:
-            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd = new_dataloader_batch_processor(batch)
+            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd = new_dataloader_batch_processor(batch)
 
             #put everything on the gpu
             xrd_int = xrd_int.cuda()
@@ -45,6 +46,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             atom_spec = atom_spec.cuda()
             disc_sim_xrd = disc_sim_xrd.cuda()
             batch = batch.cuda()
+            pv_xrd = pv_xrd.cuda()
 
             print(idx)
             print(batch)
@@ -80,7 +82,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                         print("loss: ", loss)
 
             for eval_idx in range(num_evals):
-                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True)
+                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd)
                 # set force atom types to be true 
                 force_num_atoms = True
                 

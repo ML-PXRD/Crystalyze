@@ -769,9 +769,9 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     compounds_to_remove = ""
     df = compound_restriction(df, name = compounds_to_remove)
 
+    n = round(len(df)*train_fraction)
     #allow for subsectioning of training data - used for data size impact studies 
-    if train_fraction < 1: # if train_fraction is 1 and the code below is used, it'll shuffle
-        n = round(len(df)*train_fraction)
+    if train_fraction < 1: # if train_fraction is 1 and the code below is used, it'll shuffle    
         df = df.sample(n=n)
     print("using {} rows given a train_fraction of {}".format(n, train_fraction))
     
@@ -786,6 +786,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         xrd_peak_locations_dict = torch.load(input_file[:-4] + "_xrd_peak_locations_dict.pt")
         atomic_species_dict = torch.load(input_file[:-4] + "_atomic_numbers_dict.pt")
         disc_sim_xrd_dict = torch.load(input_file[:-4] + "_disc_sim_xrd_dict.pt")
+        pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
         
         #merge everything into a list of dictionaries
         ordered_results = []
@@ -796,6 +797,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                                     'xrd_locations': xrd_peak_locations_dict[materials_id][0], 
                                     'atomic_species': atomic_species_dict[materials_id][0], 
                                     'disc_sim_xrd': disc_sim_xrd_dict[materials_id][0], 
+                                    'pv_xrd': pv_xrd_dict[materials_id],
                                     'graph_arrays': graph_dict[materials_id]})
             for prop in prop_list:
                 ordered_results[i][prop] = prop_dictionary[prop][i]
@@ -830,13 +832,19 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
         disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
 
+        pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
+
         #merge everything into a list of dictionaries
         ordered_results = []
         for i in range(len(df)):
             materials_id = df['material_id'].iloc[i]
             #all list orders except for graph_arrays should have bene preserved 
-            ordered_results.append({'xrd_intensities': xrd_intensities[i], 'xrd_locations': xrd_locations[i], 
-                            'atomic_species': atomic_species[i], 'disc_sim_xrd': disc_sim_xrd[i], 'graph_arrays': graph_dict[materials_id]})
+            ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                    'xrd_locations': xrd_locations[i], 
+                                    'atomic_species': atomic_species[i], 
+                                    'disc_sim_xrd': disc_sim_xrd[i], 
+                                    'pv_xrd': pv_xrd_dict[materials_id],
+                                    'graph_arrays': graph_dict[materials_id]})
             for prop in prop_list:
                 ordered_results[i][prop] = prop_dictionary[prop][i]
     
