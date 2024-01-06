@@ -89,7 +89,7 @@ def composition_constraint(atom_types, num_atoms, composition_per_atom):
         """
 
         # Create a range tensor and repeat it as before
-        range_tensor = torch.arange(len(num_atoms), device='cuda:0')
+        range_tensor = torch.arange(len(num_atoms), device=num_atoms.device)
         crystal_ids = torch.repeat_interleave(range_tensor, num_atoms)
 
         # Convert atom_types into a mask

@@ -18,6 +18,7 @@ dropout_rate: 0
 decoder_dropout: 0
 use_differentiable_diffraction_loss: false
 differentiable_diffraction_weight: 0
+max_num_atoms: ${max_num_atoms}
 
 wavelength : 1.5406
 q_max :  8
