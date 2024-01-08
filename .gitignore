@@ -234,3 +234,8 @@ scripts/12-05-2023_dataset_size/archive2
 
 scripts/12-21-2023_graph_preloading/output
 scripts/12-21-2023_graph_preloading/error
+
+scripts/1-06-2024_augmentation/XRDs
+scripts/1-06-2024_augmentation/proper_data_pipeline_data
+
+scripts/1-05-2024_experimental_data/multiple_evals_results/

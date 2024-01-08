@@ -48,9 +48,6 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch = batch.cuda()
             pv_xrd = pv_xrd.cuda()
 
-            #add random noise to the pv_xrd from a 0,1 normal distribution
-            #pv_xrd = pv_xrd + torch.randn(pv_xrd.shape).cuda()
-
             print(idx)
             print(batch)
 
@@ -86,6 +83,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
             for eval_idx in range(num_evals):
                 _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd)
+                # set force atom types to be true 
+                force_num_atoms = True
                 
                 gt_num_atoms = batch.num_atoms if force_num_atoms else None
                 if model.type_fixing: 

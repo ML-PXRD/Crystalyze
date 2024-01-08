@@ -347,6 +347,10 @@ class CDVAE(BaseModule):
             z = self.reparameterize(mu, log_var)
 
         elif self.use_psuedo_voigt:
+
+            if testing: 
+                print("using psuedo voigt")
+
             pv_xrd_processed = self.simple_conv_net(pv_xrd)
             z = pv_xrd_processed
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
@@ -457,8 +461,12 @@ class CDVAE(BaseModule):
         if gt_elements is not None: 
             #impose the composition constraint
             # print('the initial composition_per_atom inside of decode stats is: {}'.format(composition_per_atom[[0]]))
-            composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
-            # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+            if gt_num_atoms is not None: 
+                composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+            else:
+                composition_per_atom = self.composition_constraint(gt_elements, num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
     def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
@@ -605,6 +613,10 @@ class CDVAE(BaseModule):
         atom_spec = batch_reserve[3]
         disc_sim_xrd = batch_reserve[4]
         pv_xrd = batch_reserve[5]
+
+        #add noise to pv_xrd from normal distribution normal, 1 SD = 1
+        pv_xrd = pv_xrd + torch.randn_like(pv_xrd)
+
         # print("the pv_xrd is: {}".format(pv_xrd))
         # print("the disc sim xrd is: {}".format(disc_sim_xrd))
         batch = batch[0]
