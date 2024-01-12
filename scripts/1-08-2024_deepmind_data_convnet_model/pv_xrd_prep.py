@@ -88,12 +88,17 @@ def superimposed_pseudo_voigt(x, xy_merge, U, V, W, eta, noise_sd=0.0):
     total = total / max(total)
     return total
 
+peak_shapes = [(0.05, -0.01, 0.01)]
+noise = 0 #no noise for now, will add it dymically during training unless there's a good reason to do otherwise
+
+# Your modified pseudo_voigt and superimposed_pseudo_voigt functions go here
+
 # Function to simulate XRD for each row
 def simulate_pv_xrd_for_row(row_tuple, U, V, W):
     index, row = row_tuple  # Unpack the tuple
 
     x = np.arange(5, 90, 0.010)
-    eta = 0  # Fraction of Lorentzian component (common for all peaks)
+    eta = 0.75  # Fraction of Lorentzian component (common for all peaks)
 
     # Combine peak locations and intensities into a single array
     xy_merge = np.column_stack((row['xrd_peak_locations'], row['xrd_peak_intensities']))
@@ -102,7 +107,7 @@ def simulate_pv_xrd_for_row(row_tuple, U, V, W):
 
     return sim_xrd
 
-def apply_simulation(data, U, V, W, worker_num, n_workers, peak_shape = 0):
+def apply_simulation(data, U, V, W, worker_num, n_workers):
     # Split data for the current worker
     chunk_size = len(data) // n_workers
     start_idx = worker_num * chunk_size
@@ -124,22 +129,17 @@ def apply_simulation(data, U, V, W, worker_num, n_workers, peak_shape = 0):
 
     data_dict = {}
     for i in range(len(worker_data)):
-        key = worker_data['material_id'].iloc[i] + "_" + str(peak_shape)
-        data_dict[key] = tensor[i]
+        data_dict[worker_data['material_id'].iloc[i]] = tensor[i]
 
     return data_dict
-
-peak_shapes = [(0.05, -0.06, 0.07), (0.05, -0.01, 0.01),
-                   (0.0, 0.0, 0.01), (0.0, 0.0, random.uniform(0.001, 0.1))]
-noise = 0 #no noise for now, will add it dymically during training unless there's a good reason to do otherwise
 
 for name, data in dataframes.items():
     # Assuming peak_shapes is defined elsewhere in your code
     for peak_shape, (U, V, W) in enumerate(peak_shapes): 
-        sim_pv_xrd_intensities_dict = apply_simulation(data, U, V, W, worker_num, n_workers, peak_shape) #this going to be a n x 8192 array 
+        sim_pv_xrd_intensities_dict = apply_simulation(data, U, V, W, worker_num, n_workers) #this going to be a n x 8192 array 
 
         # Save results as a numpy array
-        output_filename = data_dir + f'{name}_sim_pv_xrd_intensities_{peak_shape}_worker_{worker_num}.pt'
+        output_filename = f'{name}_sim_pv_xrd_intensities_{peak_shape}_worker_{worker_num}.pt'
         torch.save(sim_pv_xrd_intensities_dict, output_filename)
         print("Saved to {}".format(output_filename))
 

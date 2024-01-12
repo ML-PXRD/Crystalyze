@@ -825,7 +825,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         features.append("atomic_numbers")
 
         for feature in features:
-            df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
+            df[feature] = df[feature].apply(lambda x: (x + [0]*1000)[:1000])
 
         xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
         xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
@@ -838,15 +838,31 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         ordered_results = []
         for i in range(len(df)):
             materials_id = df['material_id'].iloc[i]
-            #all list orders except for graph_arrays should have bene preserved 
-            ordered_results.append({'xrd_intensities': xrd_intensities[i],
-                                    'xrd_locations': xrd_locations[i], 
-                                    'atomic_species': atomic_species[i], 
-                                    'disc_sim_xrd': disc_sim_xrd[i], 
-                                    'pv_xrd': pv_xrd_dict[materials_id],
-                                    'graph_arrays': graph_dict[materials_id]})
-            for prop in prop_list:
-                ordered_results[i][prop] = prop_dictionary[prop][i]
+
+            if "mp_20_aug_cag" in input_file:
+                for peak_shape in range(4):
+                    adjusted_materials_id = materials_id + "_" + str(peak_shape)
+                    #all list orders except for graph_arrays should have bene preserved 
+                    ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                            'xrd_locations': xrd_locations[i], 
+                                            'atomic_species': atomic_species[i], 
+                                            'disc_sim_xrd': disc_sim_xrd[i], 
+                                            'pv_xrd': pv_xrd_dict[adjusted_materials_id],
+                                            'graph_arrays': graph_dict[materials_id]})
+                    
+                    for prop in prop_list:
+                        ordered_results[len(ordered_results) - 1][prop] = prop_dictionary[prop][i]
+            else:
+                #all list orders except for graph_arrays should have bene preserved 
+                ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                        'xrd_locations': xrd_locations[i], 
+                                        'atomic_species': atomic_species[i], 
+                                        'disc_sim_xrd': disc_sim_xrd[i], 
+                                        'pv_xrd': pv_xrd_dict[materials_id],
+                                        'graph_arrays': graph_dict[materials_id]})
+                
+                for prop in prop_list:
+                    ordered_results[i][prop] = prop_dictionary[prop][i]
     
         end = time.time()
         print("time taken: {}".format(end-start))
