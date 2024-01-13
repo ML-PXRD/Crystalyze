@@ -3,7 +3,6 @@ deterministic: False
 random_seed: 42
 
 # training
-
 pl_trainer:
   fast_dev_run: False # Enable this for debug purposes
   gpus: 2
@@ -20,6 +19,7 @@ pl_trainer:
 #/home/gridsan/tmackey/hydra/singlerun/2023-10-29/no_encode_intensity_concat_comp_concat_neg_mask_mp_20/epoch=519-step=55119.ckpt
 #/home/gridsan/tmackey/hydra/singlerun/2023-12-22/ogCDVAE_mp_20_graph_preloading_50u
 #/home/gridsan/tmackey/hydra/singlerun/2023-12-30/ogCDVAE_dm_20uv1 <- original cdvae
+#/home/gridsan/tmackey/hydra/singlerun/2024-01-08/cag_noisy_non_var
 checkpoint_path: null
 checkpoint_epoch: null
 

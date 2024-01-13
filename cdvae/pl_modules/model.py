@@ -58,7 +58,7 @@ class BaseModule(pl.LightningModule):
 
 # Define the neural network with MLP at the end
 class SimpleConvNet(nn.Module):
-    def __init__(self, in_channels, output_dim):
+    def __init__(self, in_channels, in_dim, output_dim):
         super(SimpleConvNet, self).__init__()
         self.conv_layers = nn.Sequential(
             nn.Conv1d(in_channels, 80, kernel_size = 100, stride=5),
@@ -73,7 +73,46 @@ class SimpleConvNet(nn.Module):
         )
         self.flatten = nn.Flatten()
         # Calculate flattened_size dynamically
-        self.flattened_size = self._get_flattened_size(input_shape=(1, in_channels, 8192))
+        self.flattened_size = self._get_flattened_size(input_shape=(1, in_channels, in_dim))
+        self.MLP = nn.Sequential(
+            nn.Linear(self.flattened_size, 2300),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(2300, 1150),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(1150, output_dim)
+        )
+
+    def _get_flattened_size(self, input_shape):
+        dummy_input = torch.zeros(input_shape)
+        with torch.no_grad():
+            dummy_output = self.conv_layers(dummy_input)
+        return int(np.prod(dummy_output.shape))
+
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = self.flatten(x)
+        x = self.MLP(x)
+        return x
+
+class peakloc_convnet(nn.Module):
+    def __init__(self, in_channels, in_dim, output_dim):
+        super(peakloc_convnet, self).__init__()
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(in_channels, 80, kernel_size = 2, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Conv2d(80, 80, 2, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Conv2d(80, 80, 1, stride=1, padding = 1),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+        )
+        self.flatten = nn.Flatten()
+        # Calculate flattened_size dynamically
+        self.flattened_size = self._get_flattened_size(input_shape=(1, in_channels, 2, in_dim))
         self.MLP = nn.Sequential(
             nn.Linear(self.flattened_size, 2300),
             nn.ReLU(),
@@ -212,8 +251,25 @@ class CDVAE(BaseModule):
         self.job_num = os.environ.get('SLURM_JOB_ID', '00000')   #get the job number from the environment variable
 
         self.use_psuedo_voigt = getattr(self.hparams, 'use_psuedo_voigt', False)
-        self.pretrained_weights_path = "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/12-17-2023_peak_convnet/model_final.pth"
-        self.simple_conv_net = SimpleConvNet(in_channels=1, output_dim=self.hparams.latent_dim)
+        self.in_dim = getattr(self.hparams, 'in_dim', 8192)
+
+        if self.in_dim == 8192:
+            self.pretrained_weights_path =  "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/12-17-2023_peak_convnet/model_final.pth"
+        elif self.in_dim == 8500:
+            self.pretrained_weights_path = "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/1-08-2024_cag_peak_convnet/model_final.pth"
+        else:
+            self.pretrained_weights_path = ""
+            
+        self.simple_conv_net = SimpleConvNet(in_channels=1, output_dim=self.hparams.latent_dim, in_dim=self.in_dim)
+        self.noise_sd = getattr(self.hparams, 'noise_sd', 0.0)
+        print("the noise_sd is: {}".format(self.noise_sd))
+
+        self.variational_latent_space = getattr(self.hparams, 'variational_latent_space', False)
+
+        self.apply_conv_to_peak_loc_int = getattr(self.hparams, 'apply_conv_to_peak_loc_int', False)
+        if self.apply_conv_to_peak_loc_int:
+            self.peakloc_convnet = peakloc_convnet(in_channels=1, output_dim=self.hparams.latent_dim, in_dim=200)
+
 
         if os.path.exists(self.pretrained_weights_path):
             pretrained_weights = torch.load(self.pretrained_weights_path)
@@ -347,16 +403,57 @@ class CDVAE(BaseModule):
             z = self.reparameterize(mu, log_var)
 
         elif self.use_psuedo_voigt:
+            if testing: 
+                print("using psuedo voigt")
+
             pv_xrd_processed = self.simple_conv_net(pv_xrd)
-            z = pv_xrd_processed
-            mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
-            log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+            if self.variational_latent_space:
+                hidden = pv_xrd_processed
+                mu = self.fc_mu(hidden)
+                log_var = self.fc_var(hidden)
+                z = self.reparameterize(mu, log_var)
+
+            else:
+                z = pv_xrd_processed
+                mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+                log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+                
+            return mu, log_var, z
+
+        elif self.apply_conv_to_peak_loc_int:
+            if testing: 
+                print("using peak_loc_int conv")
+
+            #remove padding from xrd_loc and xrd_int
+            xrd_loc = xrd_loc[:, :200]
+            xrd_int = xrd_int[:, :200]
+
+            stacked_input = torch.stack((xrd_loc, xrd_int), dim=1)
+            #reshape as dim 1 x 1 x dim 2 x dim 3
+            stacked_input = stacked_input.unsqueeze(1)
+            
+            assert (stacked_input.shape == (xrd_loc.shape[0], 1, 2, 200))
+
+            #apply a convnet to the stacked input
+            xrd_loc_int_processed = self.peakloc_convnet(stacked_input)
+
+            if self.variational_latent_space:
+                hidden = xrd_loc_int_processed
+                mu = self.fc_mu(hidden)
+                log_var = self.fc_var(hidden)
+                z = self.reparameterize(mu, log_var)
+
+            else:
+                z = xrd_loc_int_processed
+                mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+                log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
+            
             return mu, log_var, z
 
         else:
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
-            z = xrd_loc
+            z = xrd_loc[:, :self.hparams.latent_dim]
 
             if self.use_discrete_simulated_xrd: 
                 print("using discrete simulated xrd")
@@ -457,8 +554,12 @@ class CDVAE(BaseModule):
         if gt_elements is not None: 
             #impose the composition constraint
             # print('the initial composition_per_atom inside of decode stats is: {}'.format(composition_per_atom[[0]]))
-            composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
-            # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+            if gt_num_atoms is not None: 
+                composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+            else:
+                composition_per_atom = self.composition_constraint(gt_elements, num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
     def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
@@ -605,6 +706,10 @@ class CDVAE(BaseModule):
         atom_spec = batch_reserve[3]
         disc_sim_xrd = batch_reserve[4]
         pv_xrd = batch_reserve[5]
+
+        #add noise to pv_xrd from normal distribution normal, 1 SD = self.noise_sd
+        pv_xrd = pv_xrd + torch.randn_like(pv_xrd, device=self.device) * self.noise_sd
+
         # print("the pv_xrd is: {}".format(pv_xrd))
         # print("the disc sim xrd is: {}".format(disc_sim_xrd))
         batch = batch[0]
@@ -980,27 +1085,27 @@ class CDVAE(BaseModule):
         print("Saved batch data to {}".format(file_path))
     
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        try: 
-            teacher_forcing = (
-                self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
-            outputs = self(batch, teacher_forcing, training=True)
-            log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
-            if loss < 100000000: 
-                self.log_dict(
-                    log_dict,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=True,
-                )
-                return loss
-            else:
-                print("the loss is too high, skipping this batch")
-                self.error_tracking(batch, batch_idx, name = "train_large_loss")
-                return None
-        except Exception as e: 
-            print(f"An error occurred during training at batch {batch_idx}: {e}")
-            self.error_tracking(batch, batch_idx, name = "train")
-            return None  # Returning None will skip this batch
+        # try: 
+        teacher_forcing = (
+            self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
+        outputs = self(batch, teacher_forcing, training=True)
+        log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
+        if loss < 100000000: 
+            self.log_dict(
+                log_dict,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            return loss
+        else:
+            print("the loss is too high, skipping this batch")
+            self.error_tracking(batch, batch_idx, name = "train_large_loss")
+            return None
+        # except Exception as e: 
+        #     print(f"An error occurred during training at batch {batch_idx}: {e}")
+        #     self.error_tracking(batch, batch_idx, name = "train")
+        #     return None  # Returning None will skip this batch
 
 
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
