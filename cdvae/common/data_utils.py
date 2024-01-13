@@ -825,7 +825,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         features.append("atomic_numbers")
 
         for feature in features:
-            df[feature] = df[feature].apply(lambda x: (x + [0]*1000)[:1000])
+            df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
 
         xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
         xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])

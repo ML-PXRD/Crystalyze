@@ -424,9 +424,15 @@ class CDVAE(BaseModule):
             if testing: 
                 print("using peak_loc_int conv")
 
+            #remove padding from xrd_loc and xrd_int
+            xrd_loc = xrd_loc[:, :200]
+            xrd_int = xrd_int[:, :200]
+
             stacked_input = torch.stack((xrd_loc, xrd_int), dim=1)
             #reshape as dim 1 x 1 x dim 2 x dim 3
             stacked_input = stacked_input.unsqueeze(1)
+            
+            assert (stacked_input.shape == (xrd_loc.shape[0], 1, 2, 200))
 
             #apply a convnet to the stacked input
             xrd_loc_int_processed = self.peakloc_convnet(stacked_input)
@@ -1079,27 +1085,27 @@ class CDVAE(BaseModule):
         print("Saved batch data to {}".format(file_path))
     
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        try: 
-            teacher_forcing = (
-                self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
-            outputs = self(batch, teacher_forcing, training=True)
-            log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
-            if loss < 100000000: 
-                self.log_dict(
-                    log_dict,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=True,
-                )
-                return loss
-            else:
-                print("the loss is too high, skipping this batch")
-                self.error_tracking(batch, batch_idx, name = "train_large_loss")
-                return None
-        except Exception as e: 
-            print(f"An error occurred during training at batch {batch_idx}: {e}")
-            self.error_tracking(batch, batch_idx, name = "train")
-            return None  # Returning None will skip this batch
+        # try: 
+        teacher_forcing = (
+            self.current_epoch <= self.hparams.teacher_forcing_max_epoch)
+        outputs = self(batch, teacher_forcing, training=True)
+        log_dict, loss = self.compute_stats(batch, outputs, prefix='train')
+        if loss < 100000000: 
+            self.log_dict(
+                log_dict,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            return loss
+        else:
+            print("the loss is too high, skipping this batch")
+            self.error_tracking(batch, batch_idx, name = "train_large_loss")
+            return None
+        # except Exception as e: 
+        #     print(f"An error occurred during training at batch {batch_idx}: {e}")
+        #     self.error_tracking(batch, batch_idx, name = "train")
+        #     return None  # Returning None will skip this batch
 
 
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
