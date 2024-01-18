@@ -5,6 +5,7 @@ import torch
 from math import pi
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 
 # XRD wavelengths in angstroms
@@ -133,8 +134,8 @@ atom_form_factor_constants = [
 
 
 def get_cell_matrix(structure):
-	angles = torch.tensor(structure[0], requires_grad=True)
-	lengths = torch.tensor(structure[1], requires_grad=True)
+	angles = structure[0]
+	lengths = structure[1]
 	angles_rad = angles * pi / 180
 
 	a_vector = torch.tensor([1, 0, 0]) * lengths[0]
@@ -156,8 +157,13 @@ def collect_recip_latt_points(cell_matrix, q_max):
 	max_l = round(max_r / float(torch.linalg.norm(recip_latt[2])))
 
 	hkl_pts = get_points_in_sphere(max_h, max_k, max_l)
+
+	# Remove all points that are outside the sphere of radius r
+	hkl_pts = hkl_pts[torch.linalg.vector_norm(torch.mm(hkl_pts, recip_latt), dim = 1) <= max_r]
+
 	recip_pts = torch.mm(hkl_pts, recip_latt)
 	recip_lengths = torch.linalg.vector_norm(recip_pts, dim = 1)
+
 	return hkl_pts, recip_lengths
 
 
@@ -173,9 +179,9 @@ def get_points_in_sphere(max_h, max_k, max_l):
 	return hkl_pts
 
 def get_fcoords_occus_zs_coeffs(structure):
-	fcoords = torch.tensor(structure[2], requires_grad = True)
-	occus = torch.tensor(structure[3], requires_grad = True)
-	zs = torch.tensor(structure[4])
+	fcoords = structure[2]
+	occus = structure[3]
+	zs = structure[4]
 	coeffs = []
 
 	# Collect the coefficients for each element in the structure into a torch tensor from the atom_form_factor_constants dictionary
@@ -204,16 +210,15 @@ def calc_atomic_scattering_factor(zs, recip_lengths, coeffs):
 	return fs
 
 def calc_lorentz_factor(recip_lengths, wavelength):
-	# Calculate a theta list from r's
+	# Calculate a theta list from r's (note: asin seems to nan all derivatives even if a single value of torch.asin(r) is nan)
 	theta = torch.asin(wavelength * recip_lengths / 2)
 
 	# Calculate how the intensity of peaks are expected to tail off due to geometric constraints of experiments
 	lorentz_factor = (1 + torch.square(torch.cos(2 * theta))) / (torch.square(torch.sin(theta)) * torch.cos(theta))
 
-	"""Another way to calculate it without trig functions is
-	x = wavelength * recip_lengths / 2
-	lorentz_factor = -(4 * torch.square(torch.square(x)) + 4 * torch.square(x) - 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))
-	"""
+	#Another way to calculate it without trig functions is:
+	#x = wavelength * recip_lengths / 2
+	#lorentz_factor = (4 * torch.square(torch.square(x)) - 4 * torch.square(x) + 2) / (torch.square(x) * torch.sqrt(1 - torch.square(x)))	
 
 	return lorentz_factor
 
@@ -245,6 +250,7 @@ def diffraction_calc(structure, q_max, wavelength):
 
 	# Calculate the real instensity for each hkl
 	i_hkl = (f_hkl * torch.conj(f_hkl)).real
+	recip_lengths.retain_grad()
 
 	# Calculate the lorentz factor based on the recip lengths
 	lorentz_factor = calc_lorentz_factor(recip_lengths, wavelength)
@@ -261,9 +267,8 @@ def diffraction_calc(structure, q_max, wavelength):
 
 	# Remove all reflections which have unphysical angles/positions
 	pattern = pattern.T
-	filtered_pattern = pattern[~torch.any(pattern.isnan(), dim = 1)]
 
-	return filtered_pattern
+	return pattern
 
 
 
@@ -304,50 +309,204 @@ def bin_pattern_theta(diffraction_pattern, wavelength, q_min = 0.5, q_max = 8, n
 
 def pymatgen_pattern(pattern):
 	two_thetas = [0]
-	temp_pattern = torch.Tensor([[0,0]])
+	pymat_pattern = torch.Tensor([[0,0]])
 	for i in range(pattern.size()[0]):
 		if pattern[i, 1] > 0.001:
-			ind = torch.where(torch.abs(torch.Tensor(two_thetas) - pattern[i, 0]) < 0.1)
+			ind = torch.where(torch.abs(torch.Tensor(two_thetas) - pattern[i, 0]) < 0.01)
 			if ind[0].size()[0] > 0:
-				temp_pattern[ind[0]][0][1] = temp_pattern[ind[0]][0][1] + pattern[i][1]
+				pymat_pattern[ind[0]][0][1] = pymat_pattern[ind[0]][0][1] + pattern[i][1]
 			else:
-				temp_pattern = torch.cat((temp_pattern, pattern[i].unsqueeze(0)))
+				pymat_pattern = torch.cat((pymat_pattern, pattern[i].unsqueeze(0)))
 				two_thetas.append(pattern[i][0])
-	print(temp_pattern)
+	pymat_pattern.sort(axis = 0)
+	return(pymat_pattern)
 
 
-def diffraction_loss(structure_gen, structure_ref, wavelength = 1.54184, q_max = 4):
+def diffraction_loss(structure_gen, structure_ref, wavelength = 1.54184, q_max = 8):
 	ref_pattern = diffraction_calc(structure_ref, q_max, wavelength)
-	binned_ref_pattern = bin_pattern_theta(ref_pattern, wavelength, q_max = q_max)
+	binned_ref_pattern = bin_pattern_theta(ref_pattern, wavelength, q_max = q_max).unsqueeze(0)
 	gen_pattern = diffraction_calc(structure_gen, q_max, wavelength)
-	binned_gen_pattern = bin_pattern_theta(gen_pattern, wavelength, q_max = q_max)
+	binned_gen_pattern = bin_pattern_theta(gen_pattern, wavelength, q_max = q_max).unsqueeze(0)
+
+
+	# Calculate loss as the negative of the cosine similarity between the two patterns
+	loss = -1*F.cosine_similarity(binned_ref_pattern, binned_gen_pattern)
 	
-	# TODO: Remove this temporary block of code which plots the diffraction patterns
+	return loss
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import pandas as pd
+import pandas as pd
+from pymatgen.core.structure import Structure
+from io import StringIO
+from pymatgen.core import Lattice, Structure, Composition
+from pymatgen.analysis.diffraction.xrd import XRDCalculator
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def cif_to_pymatgen(df):
+    """
+    Convert a DataFrame containing CIF files as text into PyMatgen objects.
+
+    Parameters:
+    df (pandas.DataFrame): DataFrame where each row contains a CIF file as text.
+
+    Returns:
+    list: A list of PyMatgen Structure objects.
+    """
+    pymatgen_objects = []
+
+    for index, row in df.iterrows():
+
+        # Convert the CIF text to a StringIO object
+        cif_io = StringIO(row['cif'])
+        # Create a PyMatgen Structure object from the CIF file
+        structure = Structure.from_str(cif_io.read(), fmt="cif")
+        pymatgen_objects.append(structure)
+
+    return pymatgen_objects
+
+def one_hot_encode(numbers, n_classes=100):
+    """
+    Convert a list of numbers into a one-hot encoded matrix.
+
+    Parameters:
+    numbers (list): List of numbers.
+    n_classes (int): Number of classes for one-hot encoding.
+
+    Returns:
+    numpy.ndarray: One-hot encoded matrix.
+    """
+    # Create a matrix of zeros
+    one_hot_matrix = np.zeros((len(numbers), n_classes))
+
+    # Set the appropriate elements to 1
+    for i, num in enumerate(numbers):
+        if 1 <= num <= n_classes:
+            one_hot_matrix[i, num - 1] = 1  # subtract 1 because array indices start at 0
+
+    return one_hot_matrix
+
+def pymatgen_pattern(pattern):
+    two_thetas = [0]
+    temp_pattern = torch.Tensor([[0,0]])
+    for i in range(pattern.size()[0]):
+        if pattern[i, 1] > 0.001:
+            ind = torch.where(torch.abs(torch.Tensor(two_thetas) - pattern[i, 0]) < 0.1)
+            if ind[0].size()[0] > 0:
+                temp_pattern[ind[0]][0][1] = temp_pattern[ind[0]][0][1] + pattern[i][1]
+            else:
+                temp_pattern = torch.cat((temp_pattern, pattern[i].unsqueeze(0)))
+                two_thetas.append(pattern[i][0])
+    return(temp_pattern)
+
+
+
+
+
+
+def pymatgen_validation(pymatgen_crystal_object):
+
+	#get the crystal information into vectors
+	angles_ref = list(pymatgen_crystal_object.lattice.angles)
+	lengths_ref =list(pymatgen_crystal_object.lattice.abc)
+	atom_positions_ref = [site.frac_coords for site in pymatgen_crystal_object.sites]
+	atom_types_ref = [site.specie.number for site in pymatgen_crystal_object.sites]
+	zs_ref = np.arange(0,100) + 1
+	atom_types_ref = one_hot_encode(atom_types_ref)
+
+	xrd_calculator = XRDCalculator()
+	pattern = xrd_calculator.get_pattern(pymatgen_crystal_object)
+	combined = torch.tensor(np.column_stack((np.array(pattern.x), np.array(pattern.y))))
+
+	angles_ref = torch.tensor(angles_ref, dtype=torch.float32)
+	lengths_ref = torch.tensor(lengths_ref, dtype=torch.float32)
+	atom_positions_ref = torch.tensor(atom_positions_ref, dtype=torch.float32, requires_grad=True)
+	atom_types_ref = torch.tensor(atom_types_ref, dtype=torch.float32, requires_grad=True)
+	zs_ref = torch.tensor(zs_ref)
+	structure_ref = [angles_ref, lengths_ref, atom_positions_ref, atom_types_ref, zs_ref]
+
 	q_min = 0.5
 	num_steps = 256
+	wavelength = 1.54184
+	q_max = 4
+
+	ref_pattern = diffraction_calc(structure_ref, q_max, wavelength)
+	binned_ref_pattern = bin_pattern_theta(ref_pattern, wavelength, q_max = q_max)
+
+
+	#print(combined)
+	#print(pymatgen_pattern(ref_pattern) / torch.tensor([1,torch.max(pymatgen_pattern(ref_pattern))]))
+
+	binned_pymatgen_adjusted = bin_pattern_theta(combined, wavelength, q_max = q_max)
+
+	#normalize all
+	binned_pymatgen_adjusted /= torch.max(binned_pymatgen_adjusted)
+	binned_ref_pattern /= torch.max(binned_ref_pattern)
+
 	two_theta_min = np.arcsin((q_min * wavelength) / (4 * pi)) * 360 / pi
 	two_theta_max = np.arcsin((q_max * wavelength) / (4 * pi)) * 360 / pi
 	step_size = (two_theta_max - two_theta_min) / num_steps
 	domain = np.arange(len(binned_ref_pattern)) * step_size + two_theta_min
-	plt.plot(domain, binned_ref_pattern.detach().numpy())
-	plt.plot(domain, binned_gen_pattern.detach().numpy())
+	plt.plot(domain, binned_ref_pattern.detach().numpy(), color = "blue")
+	plt.plot(domain, binned_pymatgen_adjusted.detach().numpy(), color = "red")
 	plt.savefig("diffraction_loss.png")
-	
 
 
-angles_ref = [90.0,90.0,90.0]
-lengths_ref = [4.0,4.0,4.0]
-atom_positions_ref = [[0,0,0],[.5,.5,.5],[0.75,0.75,0.75]]
-atom_types_ref = [[0.25,0.75],[0.25,0.75],[0.5,0.5]]
-zs_ref = [1,2]
+arb_structure = Structure(Lattice.from_parameters(4,4,4,90,90,90), ["H", "H"], [[0,0,0],[0.5,0.5,0.5]])
 
-angles_gen = [90.0,90.0,90.0]
-lengths_gen = [4.0,4.0,4.0]
-atom_positions_gen = [[0,0,0],[0.5,0.5,0.5]]
-atom_types_gen = [[0.25,0.75],[0.25,0.75]]
-zs_gen = [1,2]
+
+pymatgen_validation(arb_structure)
+
+
+
+
+
+
+
+
+
+"""
+
+
+angles_ref = torch.tensor([90.0,90.0,90.0], requires_grad=True)
+lengths_ref = torch.tensor([4.0,4.0,3.5], requires_grad=True)
+atom_positions_ref = torch.tensor([[0,0,0],[.5,.5,.5]], requires_grad=True)
+atom_types_ref = torch.tensor([[0.25,0.75],[0.5,0.5]], requires_grad=True)
+zs_ref = torch.tensor([1,2])
+
+angles_gen = torch.tensor([90.0,90.0,90.0], requires_grad=True)
+lengths_gen = torch.tensor([4.0,4.0,4.0], requires_grad=True)
+atom_positions_gen = torch.tensor([[0,0,0],[0.5,0.5,0.5]], requires_grad=True)
+atom_types_gen = torch.tensor([[0.25,0.75],[0.25,0.75]], requires_grad=True)
+zs_gen = torch.tensor([1,2])
 
 structure_ref = [angles_ref, lengths_ref, atom_positions_ref, atom_types_ref, zs_ref]
 structure_gen = [angles_gen, lengths_gen, atom_positions_gen, atom_types_gen, zs_gen]
 
-diffraction_loss(structure_gen, structure_ref)
+loss = diffraction_loss(structure_gen, structure_ref)
+
+loss.backward()
+print(lengths_ref.grad)
+print(angles_ref.grad)
+print(atom_positions_ref.grad)
+print(atom_types_ref.grad)
+"""
