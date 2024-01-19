@@ -254,9 +254,9 @@ class CDVAE(BaseModule):
         self.in_dim = getattr(self.hparams, 'in_dim', 8192)
 
         if self.in_dim == 8192:
-            self.pretrained_weights_path =  "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/12-17-2023_peak_convnet/model_final.pth"
+            self.pretrained_weights_path =  "/home/gridsan/tmackey/cdvae/cdvae/pl_modules/model_final_8192.pth"
         elif self.in_dim == 8500:
-            self.pretrained_weights_path = "/home/gridsan/tmackey/XRD_Convnets/peak_convnet/1-08-2024_cag_peak_convnet/model_final.pth"
+            self.pretrained_weights_path = "/home/gridsan/tmackey/cdvae/cdvae/pl_modules/model_final_8500.pth"
         else:
             self.pretrained_weights_path = ""
             
