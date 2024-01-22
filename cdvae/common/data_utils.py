@@ -752,8 +752,8 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         df = source_restriction(df, source)
         print("using {} rows after imposing a restriction on the source".format(len(df)))
 
-        df.to_csv(df_file_name)
-        print("saved dataframe to csv file ", df_file_name)
+        # df.to_csv(df_file_name)
+        # print("saved dataframe to csv file ", df_file_name)
 
         pt_file_path = input_file[:-4] + ".pt"
         graph_dict = torch.load(pt_file_path)
@@ -761,9 +761,9 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         #make a new dictionary with only entries that have keys in the material_id column of the dataframe
         sub_graph_dict = {key: graph_dict[key] for key in df['material_id'].tolist()}
 
-        #save the new dictionary to a pt file
-        torch.save(sub_graph_dict, graph_file_name)
-        print("saved graph dictionary to pt file ", graph_file_name)
+        # #save the new dictionary to a pt file
+        # torch.save(sub_graph_dict, graph_file_name)
+        # print("saved graph dictionary to pt file ", graph_file_name)
 
     #impose a restriction eliminating a few compounds that are causing problems
     compounds_to_remove = ""
