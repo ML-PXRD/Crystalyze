@@ -32,4 +32,8 @@ then
 elif [ $1 == "disc_sim_xrd" ]
 then
     python disc_sim_xrd.py $SLURM_ARRAY_TASK_ID $2
+elif [ $1 == "pv_xrd" ] 
+then 
+    python pv_xrd_prep.py --n_workers 100 --worker_num $SLURM_ARRAY_TASK_ID
 fi
+
