@@ -1,16 +1,25 @@
 _target_: cdvae.pl_modules.model.CDVAE
 
+useoriginal: false
+use_composition_constraint: true
+use_diffraction_loss: false
+concat_peak_intensities: false
+concat_elemental_composition: false
+max_num_atoms: ${max_num_atoms}
+use_psuedo_voigt: true
+variational_latent_space: false
+in_dim: 8500
+noise_sd: ${data.noise_sd}
+apply_conv_to_peak_loc_int: false
+use_weight_initialization: true
+
+### START : OLD PARAMETERS (NOT IN DEVELOPMENT) 
 use_cond_kld: false
-useoriginal: true
 number_of_conditionals: 3
 predict_diffraction_pattern: false
 encode_diffraction_pattern: false
 diffraction_encoder_num_layers: 1
 diffraction_encoder_hidden_dim: 256
-use_composition_constraint: false
-use_diffraction_loss: false
-concat_peak_intensities: false
-concat_elemental_composition: false
 diffraction_convolution: false
 use_discrete_simulated_xrd: false
 type_fixing: false
@@ -18,18 +27,12 @@ dropout_rate: 0
 decoder_dropout: 0
 use_differentiable_diffraction_loss: false
 differentiable_diffraction_weight: 0
-max_num_atoms: ${max_num_atoms}
-use_psuedo_voigt: false
-variational_latent_space: false
-in_dim: 8500
-noise_sd: 0.01
-apply_conv_to_peak_loc_int: false
 
 wavelength : 1.5406
 q_max :  8
 q_min : 0.5
 num_steps : 200
-
+### END : OLD PARAMETERS (NOT IN DEVELOPMENT) 
 
 hidden_dim: 256
 latent_dim: 256

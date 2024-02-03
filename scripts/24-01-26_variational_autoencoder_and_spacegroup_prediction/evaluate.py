@@ -11,8 +11,6 @@ from torch_geometric.data import Batch
 from eval_utils import load_model
 from torch.nn import functional as F
 
-import numpy as np
-
 def new_dataloader_batch_processor(batch): 
     batch_reserve = batch
     xrd_int = batch_reserve[1]
@@ -39,16 +37,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
     predicted_property = []
     input_data_list = []
 
-    if num_batches < len(loader):
-        #randomly sample num_batches indices from 0 to len(loader)
-        rng = np.random.default_rng(seed=42) # want to have the batch indices be the same between evals
-        batch_indices_to_use = rng.choice(len(loader), num_batches, replace=False)
-        print("using batch indices: ", batch_indices_to_use)
-    else:
-        batch_indices_to_use = range(len(loader))
-
     for idx, batch in enumerate(loader):
-        if idx in batch_indices_to_use:
+        if idx < num_batches:
             batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd = new_dataloader_batch_processor(batch)
 
             #put everything on the gpu
@@ -58,6 +48,9 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             disc_sim_xrd = disc_sim_xrd.cuda()
             batch = batch.cuda()
             pv_xrd = pv_xrd.cuda()
+
+            #add random noise to the pv_xrd from a 0,1 normal distribution
+            pv_xrd = pv_xrd + torch.randn(pv_xrd.shape).cuda() * model.noise_sd 
 
             print(idx)
             print(batch)
@@ -77,22 +70,13 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                 _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd)
 
                 #predict the property 
-                try: 
-                    property = model.fc_property(z)
-                    print("property: ", property)
-                except:
-                    property = torch.tensor([0.0])
+                property = model.fc_property(z)
                 
                 gt_num_atoms = batch.num_atoms if force_num_atoms else None
                 if model.type_fixing: 
                     force_atom_types = True
                 gt_atom_types = batch.atom_types if force_atom_types else None
-                if gt_num_atoms is not None:
-                    print("using gt_num_atoms")
                 
-                if gt_atom_types is not None:
-                    print("using gt_atom_types")
-                    
                 outputs = model.langevin_dynamics(
                     z, ld_kwargs, gt_num_atoms, gt_atom_types, atom_spec)
 
@@ -263,13 +247,6 @@ def main(args):
         else:
             recon_out_name = f'eval_recon_{args.label}.pt'
 
-        #check to see if model_path / recon_out_name exists
-        #if it does, then we need to increment the name
-        if (model_path / recon_out_name).exists():
-            #get the number of files that have the same name
-            num_files = len(list(model_path.glob(f'eval_recon_{args.label}*')))
-            recon_out_name = f'eval_recon_{args.label}_{num_files}.pt'
-
         torch.save({
             'eval_setting': args,
             'input_data_batch': input_data_batch,
@@ -327,6 +304,7 @@ def main(args):
             gen_out_name = f'eval_opt_{args.label}.pt'
         torch.save(optimized_crystals, model_path / gen_out_name)
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', required=True)
@@ -341,7 +319,7 @@ if __name__ == '__main__':
     parser.add_argument('--start_from', default='data', type=str)
     parser.add_argument('--batch_size', default=500, type=int)
     parser.add_argument('--force_num_atoms', action='store_true')
-    #if you want to force atom types you would input --force_atom_types
+    #if you want to force atom types you would input --force_atom_types 
     parser.add_argument('--force_atom_types', action='store_true')
     parser.add_argument('--down_sample_traj_step', default=10, type=int)
     parser.add_argument('--label', default='')
