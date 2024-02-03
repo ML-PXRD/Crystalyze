@@ -726,7 +726,7 @@ def compound_restriction(df, name = "batch_82_0_20"):
 
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                train_fraction, 
-               prop_list, max_num_atoms = 20, source = "any"):
+               prop_list, max_num_atoms = 20, source = "any", index = None):
 
     print("constraints are max_num_atoms = {} and source = {}".format(max_num_atoms, source))
 
@@ -808,7 +808,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     
     #the following is the old code for getting the xrd information from the csv, will take 2-10 extra minutes 
     except Exception as e: 
-        print(e) 
+        print(e)
         
         start = time.time()
         features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
@@ -839,8 +839,28 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         for i in range(len(df)):
             materials_id = df['material_id'].iloc[i]
 
-            if "mp_20_aug_cag" in input_file:
-                for peak_shape in range(4):
+            if index is not None:
+                peak_shape = index
+                adjusted_materials_id = materials_id + "_" + str(peak_shape)
+                #all list orders except for graph_arrays should have bene preserved 
+                ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                        'xrd_locations': xrd_locations[i], 
+                                        'atomic_species': atomic_species[i], 
+                                        'disc_sim_xrd': disc_sim_xrd[i], 
+                                        'pv_xrd': pv_xrd_dict[adjusted_materials_id],
+                                        'graph_arrays': graph_dict[materials_id]})
+                
+                for prop in prop_list:
+                    ordered_results[i][prop] = prop_dictionary[prop][i]
+
+            elif "mp_20_aug_cag" in input_file or "mp_20_final" in input_file:
+                num_peaks = 0
+                if "mp_20_aug_cag" in input_file:
+                    num_peaks = 4
+                elif "mp_20_final" in input_file:
+                    num_peaks = 1
+
+                for peak_shape in range(num_peaks):
                     adjusted_materials_id = materials_id + "_" + str(peak_shape)
                     #all list orders except for graph_arrays should have bene preserved 
                     ordered_results.append({'xrd_intensities': xrd_intensities[i],
@@ -902,7 +922,6 @@ def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
         sorted(unordered_results, key=lambda x: x['batch_idx']))
     return ordered_results
 
-
 def add_scaled_lattice_prop(data_list, lattice_scale_method):
     for dict in data_list:
         graph_arrays = dict['graph_arrays']
@@ -917,7 +936,6 @@ def add_scaled_lattice_prop(data_list, lattice_scale_method):
             lengths = lengths / float(num_atoms)**(1/3)
 
         dict['scaled_lattice'] = np.concatenate([lengths, angles])
-
 
 def mard(targets, preds):
     """Mean absolute relative difference."""

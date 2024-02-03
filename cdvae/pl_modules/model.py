@@ -23,6 +23,10 @@ from pymatgen.core.structure import Structure
 from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import multivariate_normal
+from scipy.stats import gamma
 
 import os
 
@@ -226,27 +230,46 @@ class CrystGNN_Supervise(BaseModule):
 class CDVAE(BaseModule):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-
+ 
+        ### START : OLD PARAMETERS (NOT IN DEVELOPMENT) 
         self.use_cond_kld = self.hparams.use_cond_kld
-        self.useoriginal = self.hparams.useoriginal
         self.number_of_conditionals = self.hparams.number_of_conditionals
         self.predict_diffraction_pattern = self.hparams.predict_diffraction_pattern
-
         self.encode_diffraction_pattern = self.hparams.encode_diffraction_pattern
         self.diffraction_encoder_num_layers = self.hparams.diffraction_encoder_num_layers
         self.diffraction_encoder_hidden_dim = self.hparams.diffraction_encoder_hidden_dim
-        self.use_composition_constraint = self.hparams.use_composition_constraint
         self.use_diffraction_loss = self.hparams.use_diffraction_loss
-        
-        self.concat_peak_intensities = self.hparams.concat_peak_intensities
-        self.concat_elemental_composition = self.hparams.concat_elemental_composition
         self.diffraction_convolution = getattr(self.hparams, 'diffraction_convolution', False)
-        self.use_discrete_simulated_xrd = getattr(self.hparams, 'use_discrete_simulated_xrd', False)
         self.type_fixing = getattr(self.hparams, 'type_fixing', False)
         self.dropout_rate = getattr(self.hparams, 'dropout_rate', 0.0)
         self.decoder_dropout = getattr(self.hparams, 'decoder_dropout', 0.0)
         self.use_differentiable_diffraction_loss = getattr(self.hparams, 'use_differentiable_diffraction_loss', False)
         self.differentiable_diffraction_weight = getattr(self.hparams, 'differentiable_diffraction_weight', 0.0)
+        if self.predict_diffraction_pattern:
+            self.fc_xrd_loc = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim, self.hparams.fc_num_layers, 256)
+            self.fc_xrd_int = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim, self.hparams.fc_num_layers, 256)        
+        if self.encode_diffraction_pattern:
+            self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
+                                        self.diffraction_encoder_num_layers, 256)
+        
+        if self.use_cond_kld:
+            self.prior_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
+                                           self.diffraction_encoder_num_layers, 256)
+            self.prior_mu = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
+            self.prior_var = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
+        self.wavelength = getattr(self.hparams, 'wavelength', 1.5406)
+        self.q_max = getattr(self.hparams, 'q_max', 8)
+        self.q_min = getattr(self.hparams, 'q_min', 0.5)
+        self.num_steps = getattr(self.hparams, 'num_steps', 200)
+        ### END : OLD PARAMETERS (NOT IN DEVELOPMENT) 
+
+        self.useoriginal = self.hparams.useoriginal
+        self.use_composition_constraint = self.hparams.use_composition_constraint
+        
+        self.concat_peak_intensities = self.hparams.concat_peak_intensities
+        self.concat_elemental_composition = self.hparams.concat_elemental_composition
+        self.use_discrete_simulated_xrd = getattr(self.hparams, 'use_discrete_simulated_xrd', False)
+
         self.max_num_atoms = getattr(self.hparams, 'max_num_atoms', 20)
         self.job_num = os.environ.get('SLURM_JOB_ID', '00000')   #get the job number from the environment variable
 
@@ -270,30 +293,28 @@ class CDVAE(BaseModule):
         if self.apply_conv_to_peak_loc_int:
             self.peakloc_convnet = peakloc_convnet(in_channels=1, output_dim=self.hparams.latent_dim, in_dim=200)
 
-
-        if os.path.exists(self.pretrained_weights_path):
-            pretrained_weights = torch.load(self.pretrained_weights_path)
-            self.simple_conv_net.load_state_dict(pretrained_weights)
-        else:
-            print(f"Pretrained weights file not found at {self.pretrained_weights_path}")
-
+        self.use_weight_initialization = getattr(self.hparams, 'use_weight_initialization', False)
+        if self.use_weight_initialization:
+            if os.path.exists(self.pretrained_weights_path):
+                pretrained_weights = torch.load(self.pretrained_weights_path)
+                self.simple_conv_net.load_state_dict(pretrained_weights)
+            else:
+                print(f"Pretrained weights file not found at {self.pretrained_weights_path}")
+        else: 
+            print("not using weight initialization")
+            
         for param in self.simple_conv_net.parameters():
             param.requires_grad = True
 
         if torch.cuda.is_available():
             self.simple_conv_net = self.simple_conv_net.to(self.device)
-        
-        #diffraction pattern parameters
-        self.wavelength = getattr(self.hparams, 'wavelength', 1.5406)
-        self.q_max = getattr(self.hparams, 'q_max', 8)
-        self.q_min = getattr(self.hparams, 'q_min', 0.5)
-        self.num_steps = getattr(self.hparams, 'num_steps', 200)
 
         if self.diffraction_convolution:
             self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
 
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
+    
         self.decoder = hydra.utils.instantiate(self.hparams.decoder)
 
         self.fc_mu = nn.Linear(self.hparams.latent_dim,
@@ -308,6 +329,19 @@ class CDVAE(BaseModule):
         self.fc_composition = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
         
+        
+        #make an encoders for the diffraction pattern 
+        if self.encode_diffraction_pattern:
+            self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
+                                        self.diffraction_encoder_num_layers, 256)
+        
+        if self.use_cond_kld:
+            self.prior_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
+                                           self.diffraction_encoder_num_layers, 256)
+            self.prior_mu = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
+            self.prior_var = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
+
+
         #make an encoders for the diffraction pattern 
         if self.encode_diffraction_pattern:
             self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
@@ -324,11 +358,6 @@ class CDVAE(BaseModule):
             self.fc_property = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                          self.hparams.fc_num_layers, 1)
             
-        # for diffraction pattern prediction.
-        if self.predict_diffraction_pattern:
-            self.fc_xrd_loc = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim, self.hparams.fc_num_layers, 256)
-            self.fc_xrd_int = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim, self.hparams.fc_num_layers, 256)
-
         sigmas = torch.tensor(np.exp(np.linspace(
             np.log(self.hparams.sigma_begin),
             np.log(self.hparams.sigma_end),
@@ -363,44 +392,46 @@ class CDVAE(BaseModule):
         eps = torch.randn_like(std)
         return eps * std + mu
     
-    def prior_encode(self, batch, xrd_int, xrd_loc, atom_spec):
-        #concatenate together xrd_int, xrd_loc, and atom_spec
-        #the concatenated tensor is 256 x 768
-        if self.number_of_conditionals == 1: 
-            concat_xrd_loc_atom_spec = xrd_loc
-        elif self.number_of_conditionals == 2:
-            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
-        elif self.number_of_conditionals == 3:
-            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
-        elif self.number_of_conditionals > 3:
-            raise ValueError('The number of conditionals must be 1, 2, or 3')
+    # def prior_encode(self, batch, xrd_int, xrd_loc, atom_spec):
+    #     #concatenate together xrd_int, xrd_loc, and atom_spec
+    #     #the concatenated tensor is 256 x 768
+    #     if self.number_of_conditionals == 1: 
+    #         concat_xrd_loc_atom_spec = xrd_loc
+    #     elif self.number_of_conditionals == 2:
+    #         concat_xrd_loc_atom_spec = torch.cat((xrd_loc, atom_spec), dim=1)
+    #     elif self.number_of_conditionals == 3:
+    #         concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
+    #     elif self.number_of_conditionals > 3:
+    #         raise ValueError('The number of conditionals must be 1, 2, or 3')
         
-        #using just the xrd_loc as the encoding for now
-        encoding = self.prior_encoder(concat_xrd_loc_atom_spec)
-        mu = self.prior_mu(encoding)
-        log_var = self.prior_var(encoding)
+    #     #using just the xrd_loc as the encoding for now
+    #     encoding = self.prior_encoder(concat_xrd_loc_atom_spec)
+    #     mu = self.prior_mu(encoding)
+    #     log_var = self.prior_var(encoding)
 
-        z = self.reparameterize(mu, log_var)
-        return mu, log_var, z
+    #     z = self.reparameterize(mu, log_var)
+    #     return mu, log_var, z
     
     def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False, pv_xrd = None):
         """
-        encode crystal structures to latents.
+        encode diffraction patterns to latents.
         """
-        if self.useoriginal or self.use_cond_kld:
+        if self.useoriginal:
             hidden = self.encoder(batch)         
             mu = self.fc_mu(hidden)
             log_var = self.fc_var(hidden)
             z = self.reparameterize(mu, log_var)
 
-        elif self.encode_diffraction_pattern:
-            concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
-            concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
-            hidden = self.post_encoder(concat_xrd_loc_atom_spec)
+            return mu, log_var, z
 
-            mu = self.fc_mu(hidden)
-            log_var = self.fc_var(hidden)
-            z = self.reparameterize(mu, log_var)
+        # elif self.encode_diffraction_pattern:
+        #     concat_xrd_loc_atom_spec = torch.cat((xrd_loc, xrd_int, atom_spec), dim=1)
+        #     concat_xrd_loc_atom_spec = concat_xrd_loc_atom_spec.cuda(0)
+        #     hidden = self.post_encoder(concat_xrd_loc_atom_spec)
+
+        #     mu = self.fc_mu(hidden)
+        #     log_var = self.fc_var(hidden)
+        #     z = self.reparameterize(mu, log_var)
 
         elif self.use_psuedo_voigt:
             if testing: 
@@ -409,6 +440,10 @@ class CDVAE(BaseModule):
             pv_xrd_processed = self.simple_conv_net(pv_xrd)
             if self.variational_latent_space:
                 hidden = pv_xrd_processed
+
+                #normalize the hidden vector per row 
+                hidden = F.normalize(hidden, p=2, dim=1)
+
                 mu = self.fc_mu(hidden)
                 log_var = self.fc_var(hidden)
                 z = self.reparameterize(mu, log_var)
@@ -451,6 +486,7 @@ class CDVAE(BaseModule):
             return mu, log_var, z
 
         else:
+            # in the remaining situations, we will not do any encoding of diffraction information. 
             mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
             log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
             z = xrd_loc[:, :self.hparams.latent_dim]
@@ -488,35 +524,35 @@ class CDVAE(BaseModule):
 
                     z = torch.cat((xrd_loc_sliced, xrd_int_sliced, atom_spec_sliced), dim=1)
 
-            elif self.diffraction_convolution:                
-                if self.concat_elemental_composition: 
-                    #first, we want to slice them to get the first 236 columns of xrd_loc and the first 236 columns of xrd_int
-                    xrd_loc_sliced = xrd_loc[:, :236]
-                    xrd_int_sliced = xrd_int[:, :236]
+            # elif self.diffraction_convolution:                
+            #     if self.concat_elemental_composition: 
+            #         #first, we want to slice them to get the first 236 columns of xrd_loc and the first 236 columns of xrd_int
+            #         xrd_loc_sliced = xrd_loc[:, :236]
+            #         xrd_int_sliced = xrd_int[:, :236]
 
-                    print("the shape of the sliced xrd_loc is: {}".format(xrd_loc_sliced.shape))
-                    print("the shape of the sliced xrd_int is: {}".format(xrd_int_sliced.shape))
-                    # we want to stack them to make a 512 x 2 x 236 tensor
-                    input_tensor = torch.stack((xrd_loc_sliced, xrd_int_sliced), dim=1)
-                    print("input_tensor shape is: {}".format(input_tensor.shape))
-                    output_tensor = self.diff_conv(input_tensor)
-                    #print the shape 
-                    print('the shape of the output tensor is: {}'.format(output_tensor.shape))
-                    #the output tensor is 512 x 1 x 256 so we need to reshape it to be 256 x 256
-                    output_tensor_squeezed_sliced = output_tensor.squeeze()
-                    #print the shape
-                    print('the shape of the output tensor squeezed is: {}'.format(output_tensor_squeezed_sliced.shape))
-                    atom_spec_sliced = atom_spec[:, :21]
-                    z = torch.cat((output_tensor_squeezed_sliced, atom_spec_sliced), dim=1)
-                    #print the first row of z
-                    print('the first row of z is: {}'.format(z[[0]]))
-                else:
-                    #since we're not concatenating the elemental composition, we can just use the xrd_loc and xrd_int tensors as is
-                    input_tensor = torch.stack((xrd_loc, xrd_int), dim=1)
-                    output_tensor = self.diff_conv(input_tensor)
-                    #the output tensor is 256 x 1 x 256 so we need to reshape it to be 256 x 256
-                    output_tensor_squeezed = output_tensor.squeeze()
-                    z = output_tensor_squeezed
+            #         print("the shape of the sliced xrd_loc is: {}".format(xrd_loc_sliced.shape))
+            #         print("the shape of the sliced xrd_int is: {}".format(xrd_int_sliced.shape))
+            #         # we want to stack them to make a 512 x 2 x 236 tensor
+            #         input_tensor = torch.stack((xrd_loc_sliced, xrd_int_sliced), dim=1)
+            #         print("input_tensor shape is: {}".format(input_tensor.shape))
+            #         output_tensor = self.diff_conv(input_tensor)
+            #         #print the shape 
+            #         print('the shape of the output tensor is: {}'.format(output_tensor.shape))
+            #         #the output tensor is 512 x 1 x 256 so we need to reshape it to be 256 x 256
+            #         output_tensor_squeezed_sliced = output_tensor.squeeze()
+            #         #print the shape
+            #         print('the shape of the output tensor squeezed is: {}'.format(output_tensor_squeezed_sliced.shape))
+            #         atom_spec_sliced = atom_spec[:, :21]
+            #         z = torch.cat((output_tensor_squeezed_sliced, atom_spec_sliced), dim=1)
+            #         #print the first row of z
+            #         print('the first row of z is: {}'.format(z[[0]]))
+            #     else:
+            #         #since we're not concatenating the elemental composition, we can just use the xrd_loc and xrd_int tensors as is
+            #         input_tensor = torch.stack((xrd_loc, xrd_int), dim=1)
+            #         output_tensor = self.diff_conv(input_tensor)
+            #         #the output tensor is 256 x 1 x 256 so we need to reshape it to be 256 x 256
+            #         output_tensor_squeezed = output_tensor.squeeze()
+            #         z = output_tensor_squeezed
             else:
                 if self.concat_elemental_composition:
                     #we want to take the first 236 columns of xrd_loc and the first 20 columns of atom_spec and concatenate them together
@@ -562,14 +598,48 @@ class CDVAE(BaseModule):
                 # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
         return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
 
+
+    def decode_stats_with_sampling(self, z, gt_num_atoms=None, gt_lengths=None, gt_angles=None,
+                        teacher_forcing=False, gt_elements = None):
+        """
+        decode key stats from latent embeddings.
+        batch is input during training for teach-forcing.
+        """
+        if gt_num_atoms is not None:
+            num_atoms = self.predict_num_atoms(z)
+            lengths_and_angles, lengths, angles = (
+                self.predict_lattice(z, gt_num_atoms))
+            composition_per_atom = self.predict_composition(z, gt_num_atoms)
+            if self.hparams.teacher_forcing_lattice and teacher_forcing:
+                lengths = gt_lengths
+                angles = gt_angles
+        else:
+            atom_logits = self.fc_num_atoms(z)
+            print('sampling from the distribution for the number of atoms')
+            num_atoms = torch.multinomial(torch.nn.functional.softmax(atom_logits, dim=-1), 1).squeeze(-1)
+            lengths_and_angles, lengths, angles = (
+                self.predict_lattice(z, num_atoms))
+            composition_per_atom = self.predict_composition(z, num_atoms)
+
+        if gt_elements is not None: 
+            #impose the composition constraint
+            # print('the initial composition_per_atom inside of decode stats is: {}'.format(composition_per_atom[[0]]))
+            if gt_num_atoms is not None: 
+                composition_per_atom = self.composition_constraint(gt_elements, gt_num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+            else:
+                composition_per_atom = self.composition_constraint(gt_elements, num_atoms, composition_per_atom)
+                # print('the final composition_per_atom inside decode stats is: {}'.format(composition_per_atom[[0]]))
+        return num_atoms, lengths_and_angles, lengths, angles, composition_per_atom
+
     def composition_constraint(self, atom_types, num_atoms, composition_per_atom):
             """
-            Restrict the probability distribution from which the atom types are randomly drawn 
+            Implicitly restrict the probability distribution from which the atom types are randomly drawn 
             to only include the elements that are present in the crystal.
 
             atom_types: the atom types in the crystal
             num_atoms: the number of atoms in the crystal
-            composition_per_atom: the probability distribution from which the atom types are randomly drawn 
+            composition_per_atom: the predicted score per element type for each atom in the crystal. fed into the softmax function
 
             """
 
@@ -607,7 +677,7 @@ class CDVAE(BaseModule):
             return composition_per_atom
 
     @torch.no_grad()
-    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None, gt_elements_input=None):
+    def langevin_dynamics(self, z, ld_kwargs, gt_num_atoms=None, gt_atom_types=None, gt_elements_input=None, sampling = False):
         """
         decode crystral structure from latent embeddings.
         ld_kwargs: args for doing annealed langevin dynamics sampling:
@@ -630,9 +700,14 @@ class CDVAE(BaseModule):
         if not self.use_composition_constraint: 
             gt_elements_input = None
 
-        num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats(
-            z, gt_num_atoms, gt_elements=gt_elements_input)
-  
+        if sampling: 
+             #use the sampling version of decode stats
+            num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats_with_sampling(
+                z, gt_num_atoms, gt_elements=gt_elements_input)
+        else: 
+            num_atoms, _, lengths, angles, composition_per_atom = self.decode_stats(
+                z, gt_num_atoms, gt_elements=gt_elements_input)
+        
         if gt_num_atoms is not None:
             num_atoms = gt_num_atoms
 
@@ -708,20 +783,59 @@ class CDVAE(BaseModule):
         pv_xrd = batch_reserve[5]
 
         #add noise to pv_xrd from normal distribution normal, 1 SD = self.noise_sd
-        pv_xrd = pv_xrd + torch.randn_like(pv_xrd, device=self.device) * self.noise_sd
+        if self.noise_sd > 0.0:
+            pv_xrd = pv_xrd + torch.randn_like(pv_xrd, device=self.device) * self.noise_sd
+        elif self.noise_sd == -1:
+            #new 
+            #now, let's try to reproduce the noise using just the parameters of the multivariate normal distribution
+            mean = np.array([1.06709083, -5.39670499])
+            cov = np.array([[0.19984825, 0.14809546],
+                            [0.14809546, 1.31019437]])
 
-        # print("the pv_xrd is: {}".format(pv_xrd))
-        # print("the disc sim xrd is: {}".format(disc_sim_xrd))
+            # Create an instance of a multivariate normal distribution
+            mvn = multivariate_normal(mean, cov)
+
+            # Sample points from the distribution
+            num_samples = 500  # You can change this to your desired number of samples
+            samples = mvn.rvs(size=num_samples)
+
+            #remove any samples with values in the second column greater than ln(0.05)
+            #remove any samples with values in the first column greater than ln(10)
+            samples_filtered = samples[samples[:,1] < np.log(0.05)]
+            samples_filtered = samples_filtered[samples_filtered[:,0] < np.log(10)]
+
+            #take the first 256 
+            samples_filtered = samples_filtered[:pv_xrd.shape[0]]
+
+            #calculate the exponentials of the samples
+            samples_exp = np.exp(samples_filtered)
+
+            a = samples_exp[:, 0]
+            scale = samples_exp[:, 1]
+            #make a gamma distribution for each a and scale
+            gamma_samples = []
+            for i in range(len(a)):
+                gamma_samples.append(gamma(a = a[i], scale = scale[i], loc = 0).rvs(8500))
+            
+            gamma_samples = np.stack(gamma_samples)
+            gamma_samples = torch.tensor(gamma_samples, device=self.device)
+
+            #unsqueeze at the 1st dimension
+            gamma_samples = gamma_samples.unsqueeze(1)
+
+            #add the gamma samples to the first 8500 columns of the pv_xrd
+            pv_xrd[:, :8500] = pv_xrd[:, :8500] + gamma_samples
+
         batch = batch[0]
-
+        
         mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec,
                                       discrete_simulated_xrd = disc_sim_xrd, 
                                       pv_xrd = pv_xrd)
         kld_loss = self.kld_loss(mu, log_var)
 
-        if self.use_cond_kld:
-            prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)   
-            kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
+        # if self.use_cond_kld:
+        #     prior_mu, prior_log_var, prior_z = self.prior_encode(batch, xrd_int, xrd_loc, atom_spec)   
+        #     kld_loss = self.kld_loss_prior(mu, log_var, prior_mu, prior_log_var)
 
         if self.use_composition_constraint: 
             gt_elements = atom_spec
@@ -754,16 +868,16 @@ class CDVAE(BaseModule):
             F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM) +
             pred_composition_probs * used_type_sigmas_per_atom[:, None])
         
+        
+        #print out the distribution over which the random atom types are being sampled
+        # print('the distributions over which the random atom types are being sampled is: {}'.format(atom_type_probs[range(0, batch.num_atoms[0].item())]))
+
+
         #print out the distribution over which the random atom types are being sampled
         # print('the distributions over which the random atom types are being sampled is: {}'.format(atom_type_probs[range(0, batch.num_atoms[0].item())]))
 
         rand_atom_types = torch.multinomial(
             atom_type_probs, num_samples=1).squeeze(1) + 1
-
-        # #print the true atom types for the first crystal 
-        # print('the true atom types for the first crystal are: {}'.format(batch.atom_types[range(0, batch.num_atoms[0].item())]))
-        # #print the predicted atom types for the first crystal
-        # print('the predicted atom types for the first crystal are: {}'.format(rand_atom_types[range(0, batch.num_atoms[0].item())]))
 
         # add noise to the cart coords
         cart_noises_per_atom = (
@@ -775,25 +889,18 @@ class CDVAE(BaseModule):
         noisy_frac_coords = cart_to_frac_coords(
             cart_coords, pred_lengths, pred_angles, batch.num_atoms)
 
-        #print whether or not the model is using type fixing
-        print('the model is using type fixing: {}'.format(self.type_fixing))
+        # if self.decoder_dropout > 0.0:
+        #     print("using decoder dropout")
+        #     z = F.dropout(z, p=self.decoder_dropout, training=self.training)
 
-        if self.decoder_dropout > 0.0:
-            print("using decoder dropout")
-            z = F.dropout(z, p=self.decoder_dropout, training=self.training)
-
-        if self.type_fixing: 
-            pred_cart_coord_diff, pred_atom_types = self.decoder(
-            z, noisy_frac_coords, batch.atom_types, batch.num_atoms, 
-            pred_lengths, pred_angles, gt_elements, dropout = self.decoder_dropout, is_training = True)
-        else: 
-            pred_cart_coord_diff, pred_atom_types = self.decoder(
+        pred_cart_coord_diff, pred_atom_types = self.decoder(
             z, noisy_frac_coords, rand_atom_types, batch.num_atoms, 
             pred_lengths, pred_angles, gt_elements, dropout = self.decoder_dropout, is_training = True)
         
-        if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
-            decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
+        # if self.use_diffraction_loss:    #get the diffraction pattern from the prediction 
+        #     decoded_xrd_loc, decoded_xrd_int = self.get_diffraction_pattern(pred_cart_coord_diff, pred_atom_types, batch.num_atoms, pred_lengths, pred_angles)
         
+
         # compute loss.
         num_atom_loss = self.num_atom_loss(pred_num_atoms, batch)
             
@@ -805,21 +912,20 @@ class CDVAE(BaseModule):
         type_loss = self.type_loss(pred_atom_types, batch.atom_types,
                                 used_type_sigmas_per_atom, batch)
         
-        differentiable_diffraction_loss = 0 
-
         if self.hparams.predict_property:
             property_loss = self.property_loss(z, batch)
         else:
             property_loss = 0.
 
-        if self.use_diffraction_loss:
-            #calculate the diffraction loss
-            diffraction_loss = self.diffraction_pattern_loss(decoded_xrd_loc, decoded_xrd_int, xrd_loc, xrd_int)
-        else:
-            diffraction_loss = 0.
+        # if self.use_diffraction_loss:
+        #     #calculate the diffraction loss
+        #     diffraction_loss = self.diffraction_pattern_loss(decoded_xrd_loc, decoded_xrd_int, xrd_loc, xrd_int)
+        # else:
+        #     diffraction_loss = 0.
+        diffraction_loss = 0 #legacy from old experiments
 
-        if self.predict_diffraction_pattern: 
-            property_loss = self.diffraction_property_loss(z, xrd_loc, xrd_int)
+        # if self.predict_diffraction_pattern: 
+        #     property_loss = self.diffraction_property_loss(z, xrd_loc, xrd_int)
  
         return {
             'num_atom_loss': num_atom_loss,
@@ -925,80 +1031,80 @@ class CDVAE(BaseModule):
     def property_loss(self, z, batch):
         return F.mse_loss(self.fc_property(z), batch.y)
 
-    def diffraction_property_loss(self, z, gt_xrd_loc, gt_xrd_int):
+    # def diffraction_property_loss(self, z, gt_xrd_loc, gt_xrd_int):
 
-        pred_loc = self.fc_xrd_loc(z)
-        pred_int = self.fc_xrd_int(z)
+    #     pred_loc = self.fc_xrd_loc(z)
+    #     pred_int = self.fc_xrd_int(z)
 
-        loss = self.diffraction_pattern_loss(pred_loc, pred_int, gt_xrd_loc, gt_xrd_int)
+    #     loss = self.diffraction_pattern_loss(pred_loc, pred_int, gt_xrd_loc, gt_xrd_int)
 
-        return loss
+    #     return loss
     
-    def get_diffraction_pattern(self, pred_num_atoms, pred_frac_coords, pred_atom_types, pred_lengths, pred_angles):
-        for i in range(len(pred_num_atoms)):
-            def tensor_to_list(tensor_data):
-                # If the data is a tensor, move to CPU and convert to list
-                if isinstance(tensor_data, torch.Tensor):
-                    return tensor_data.cpu().tolist()
-                return tensor_data
+    # def get_diffraction_pattern(self, pred_num_atoms, pred_frac_coords, pred_atom_types, pred_lengths, pred_angles):
+    #     for i in range(len(pred_num_atoms)):
+    #         def tensor_to_list(tensor_data):
+    #             # If the data is a tensor, move to CPU and convert to list
+    #             if isinstance(tensor_data, torch.Tensor):
+    #                 return tensor_data.cpu().tolist()
+    #             return tensor_data
             
-            num_atoms = pred_num_atoms[i].item()
-            atom_types = pred_atom_types[i][:num_atoms]
-            frac_coords = pred_frac_coords[i][:num_atoms]
-            angles = tensor_to_list(pred_angles[i])
-            lengths = tensor_to_list(pred_lengths[i])
+    #         num_atoms = pred_num_atoms[i].item()
+    #         atom_types = pred_atom_types[i][:num_atoms]
+    #         frac_coords = pred_frac_coords[i][:num_atoms]
+    #         angles = tensor_to_list(pred_angles[i])
+    #         lengths = tensor_to_list(pred_lengths[i])
 
-            if isinstance(atom_types, torch.Tensor):
-                atomic_species = [Element.from_Z(atom_type.item()).symbol for atom_type in atom_types.cpu()]
-            else:
-                atomic_species = tensor_to_list(atom_types)
+    #         if isinstance(atom_types, torch.Tensor):
+    #             atomic_species = [Element.from_Z(atom_type.item()).symbol for atom_type in atom_types.cpu()]
+    #         else:
+    #             atomic_species = tensor_to_list(atom_types)
   
-            frac_coords = tensor_to_list(frac_coords)
-            alpha, beta, gamma = tensor_to_list(angles)
-            a, b, c = tensor_to_list(lengths)
+    #         frac_coords = tensor_to_list(frac_coords)
+    #         alpha, beta, gamma = tensor_to_list(angles)
+    #         a, b, c = tensor_to_list(lengths)
 
-            lattice = Lattice.from_parameters(a=a, b=b, c=c, alpha=alpha, beta=beta, gamma=gamma)
-            structure = Structure(lattice, species=atomic_species, coords=frac_coords, coords_are_cartesian=False)
+    #         lattice = Lattice.from_parameters(a=a, b=b, c=c, alpha=alpha, beta=beta, gamma=gamma)
+    #         structure = Structure(lattice, species=atomic_species, coords=frac_coords, coords_are_cartesian=False)
 
-            pattern = xrd_calculator.get_pattern(structure)
+    #         pattern = xrd_calculator.get_pattern(structure)
 
-            #use diffraction pattern post processing to get the diffraction pattern
-            adjusted_vector, adjusted_intensities = self.diffraction_pattern_post_processing(pattern.x, pattern.y)
+    #         #use diffraction pattern post processing to get the diffraction pattern
+    #         adjusted_vector, adjusted_intensities = self.diffraction_pattern_post_processing(pattern.x, pattern.y)
 
-            peak_locations.append(adjusted_vector)
-            peak_intensities.append(adjusted_intensities)
+    #         peak_locations.append(adjusted_vector)
+    #         peak_intensities.append(adjusted_intensities)
         
-        peak_locations = torch.tensor(peak_locations).to('cuda:0').to(torch.float32)        
-        peak_intensities = torch.tensor(peak_intensities).to('cuda:0').to(torch.float32)
+    #     peak_locations = torch.tensor(peak_locations).to('cuda:0').to(torch.float32)        
+    #     peak_intensities = torch.tensor(peak_intensities).to('cuda:0').to(torch.float32)
 
-        return peak_locations, peak_intensities
+    #     return peak_locations, peak_intensities
     
-    def diffraction_pattern_post_processing(self, xrd_loc, xrd_int):
-        #get the xrd pattern
-        adjusted_vector = np.zeros(256)
-        minimum = min(256, len(xrd_loc))
-        adjusted_vector[:minimum] = xrd_loc[:minimum]
+    # def diffraction_pattern_post_processing(self, xrd_loc, xrd_int):
+    #     #get the xrd pattern
+    #     adjusted_vector = np.zeros(256)
+    #     minimum = min(256, len(xrd_loc))
+    #     adjusted_vector[:minimum] = xrd_loc[:minimum]
 
-        #get the xrd intensities
-        adjusted_intensities = np.zeros(256)
-        minimum = min(256, len(xrd_int))
-        adjusted_intensities[:minimum] = xrd_int[:minimum]
+    #     #get the xrd intensities
+    #     adjusted_intensities = np.zeros(256)
+    #     minimum = min(256, len(xrd_int))
+    #     adjusted_intensities[:minimum] = xrd_int[:minimum]
 
-        return adjusted_vector, adjusted_intensities
+    #     return adjusted_vector, adjusted_intensities
 
-    def diffraction_pattern_loss(self, decoded_xrd, decoded_int, gt_xrd_loc, gt_xrd_int):
-        #get the rmse loss between the decoded xrd and the gt xrd loc
-        xrd_loc_mse_loss = F.mse_loss(decoded_xrd, gt_xrd_loc)
+    # def diffraction_pattern_loss(self, decoded_xrd, decoded_int, gt_xrd_loc, gt_xrd_int):
+    #     #get the rmse loss between the decoded xrd and the gt xrd loc
+    #     xrd_loc_mse_loss = F.mse_loss(decoded_xrd, gt_xrd_loc)
 
-        #get the mean cosine similarity between the decoded xrd and the gt xrd loc
-        xrd_int_cosine_sim = F.cosine_similarity(decoded_int, gt_xrd_int, dim=1)
-        # Converting similarity to dissimilarity (loss)
-        xrd_int_cosine_loss = 1 - xrd_int_cosine_sim.mean() 
+    #     #get the mean cosine similarity between the decoded xrd and the gt xrd loc
+    #     xrd_int_cosine_sim = F.cosine_similarity(decoded_int, gt_xrd_int, dim=1)
+    #     # Converting similarity to dissimilarity (loss)
+    #     xrd_int_cosine_loss = 1 - xrd_int_cosine_sim.mean() 
 
-        return xrd_loc_mse_loss + xrd_int_cosine_loss
+    #     return xrd_loc_mse_loss + xrd_int_cosine_loss
 
-    def diffraction_property_loss_cosine_similarity(self, z, xrd_loc):
-        return F.cosine_similarity(self.fc_diffraction_pattern(z), xrd_loc)
+    # def diffraction_property_loss_cosine_similarity(self, z, xrd_loc):
+    #     return F.cosine_similarity(self.fc_diffraction_pattern(z), xrd_loc)
 
     def lattice_loss(self, pred_lengths_and_angles, batch):
         self.lattice_scaler.match_device(pred_lengths_and_angles)
@@ -1052,26 +1158,26 @@ class CDVAE(BaseModule):
             -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1), dim=0)
         return kld_loss
     
-    #define a kld loss between the posterior and prorior distributions
-    def kld_loss_prior(self, mu, log_var, prior_mu, prior_log_var):
-        #print all the values
-        A = 10
-        # For log_var
-        log_var = A * torch.tanh(log_var)
+    # #define a kld loss between the posterior and prorior distributions
+    # def kld_loss_prior(self, mu, log_var, prior_mu, prior_log_var):
+    #     #print all the values
+    #     A = 10
+    #     # For log_var
+    #     log_var = A * torch.tanh(log_var)
  
-        # For prior_log_var
-        prior_log_var = A * torch.tanh(prior_log_var)
+    #     # For prior_log_var
+    #     prior_log_var = A * torch.tanh(prior_log_var)
 
-        diff_squared = (mu - prior_mu)**2
-        term1 = prior_log_var - log_var
-        term2 = (torch.exp(log_var) + diff_squared) / torch.exp(prior_log_var)
-        kld_loss = torch.mean(
-            0.5 * torch.sum(term1 + term2 - 1, dim=1),
-            dim=0
-        )
+    #     diff_squared = (mu - prior_mu)**2
+    #     term1 = prior_log_var - log_var
+    #     term2 = (torch.exp(log_var) + diff_squared) / torch.exp(prior_log_var)
+    #     kld_loss = torch.mean(
+    #         0.5 * torch.sum(term1 + term2 - 1, dim=1),
+    #         dim=0
+    #     )
 
-        # print("kld_loss: ", kld_loss)
-        return kld_loss
+    #     # print("kld_loss: ", kld_loss)
+    #     return kld_loss
 
     def error_tracking(self, batch, batch_idx, name = "train"): 
 
@@ -1100,7 +1206,7 @@ class CDVAE(BaseModule):
             return loss
         else:
             print("the loss is too high, skipping this batch")
-            self.error_tracking(batch, batch_idx, name = "train_large_loss")
+            #self.error_tracking(batch, batch_idx, name = "train_large_loss")
             return None
         # except Exception as e: 
         #     print(f"An error occurred during training at batch {batch_idx}: {e}")
@@ -1121,7 +1227,7 @@ class CDVAE(BaseModule):
             return loss
         except Exception as e: 
             print(f"An error occurred during validation at batch {batch_idx}: {e}")
-            self.error_tracking(batch, batch_idx, name = "val")
+            #self.error_tracking(batch, batch_idx, name = "val")
             return None
 
     def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
@@ -1134,7 +1240,7 @@ class CDVAE(BaseModule):
             return loss
         except Exception as e:
             print(f"An error occurred during testing at batch {batch_idx}: {e}")
-            self.error_tracking(batch, batch_idx, name = "test")
+            #self.error_tracking(batch, batch_idx, name = "test")
             return None
         
     def compute_stats(self, batch, outputs, prefix):
@@ -1151,7 +1257,7 @@ class CDVAE(BaseModule):
         kld_loss = outputs['kld_loss']
         composition_loss = outputs['composition_loss']
         property_loss = outputs['property_loss']
-        diffraction_loss = outputs['diffraction_loss']
+        diffraction_loss = outputs['diffraction_loss']  # legacy from old experiments
         # differentiable_diffraction_loss = outputs['differentiable_diffraction_loss']
 
         loss = (
@@ -1162,7 +1268,7 @@ class CDVAE(BaseModule):
             self.hparams.beta * kld_loss +
             self.hparams.cost_composition * composition_loss +
             self.hparams.cost_property * property_loss + 
-            self.hparams.cost_diffraction * diffraction_loss)
+            self.hparams.cost_diffraction * diffraction_loss) # legacy from old experiments
 
         log_dict = {
             f'{prefix}_loss': loss,
@@ -1172,7 +1278,7 @@ class CDVAE(BaseModule):
             f'{prefix}_type_loss': type_loss,
             f'{prefix}_kld_loss': kld_loss,
             f'{prefix}_composition_loss': composition_loss,
-            f'{prefix}_diffraction_loss': diffraction_loss,
+            f'{prefix}_diffraction_loss': diffraction_loss,  # legacy from old experiments
         }
 
         if prefix != 'train':

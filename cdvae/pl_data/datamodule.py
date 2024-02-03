@@ -60,12 +60,22 @@ class CrystDataModule(pl.LightningDataModule):
         # Load once to compute property scaler
         if scaler_path is None:
             train_dataset = hydra.utils.instantiate(self.datasets.train)
-            self.lattice_scaler = get_scaler_from_data_list(
-                train_dataset.cached_data,
-                key='scaled_lattice')
-            self.scaler = get_scaler_from_data_list(
-                train_dataset.cached_data,
-                key=train_dataset.prop)
+            if train_dataset.num_augmented_data == 0: 
+                self.lattice_scaler = get_scaler_from_data_list(
+                    train_dataset.cached_data,
+                    key='scaled_lattice')
+            else: 
+                self.lattice_scaler = get_scaler_from_data_list(
+                    train_dataset.cached_data[0],
+                    key='scaled_lattice')
+            if train_dataset.num_augmented_data == 0:
+                self.scaler = get_scaler_from_data_list(
+                    train_dataset.cached_data,
+                    key=train_dataset.prop)
+            else:
+                self.scaler = get_scaler_from_data_list(
+                    train_dataset.cached_data[0],
+                    key=train_dataset.prop)
         else:
             self.lattice_scaler = torch.load(
                 Path(scaler_path) / 'lattice_scaler.pt')

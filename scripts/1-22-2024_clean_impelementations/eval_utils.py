@@ -56,28 +56,13 @@ def load_config(model_path):
 
 
 def load_model(model_path, load_data=False, testing=True, test_set_override=None):
-    # with initialize_config_dir(str(model_path)):
-    #     if test_set_override is not None:
-    #         cfg = compose(config_name='hparams', overrides=[f"data.root_path=/home/gridsan/tmackey/cdvae/data/{test_set_override}",
-    #                                                         f"data.eval_model_name={test_set_override}"])
-    #         print("overriding data with ", test_set_override)
-    #     else:
-    #         cfg = compose(config_name='hparams')
     with initialize_config_dir(str(model_path)):
-        # Load the base configuration
-        base_cfg = compose(config_name='hparams')
-
         if test_set_override is not None:
-            # Load the data configuration from the file of interest
-            data_cfg_path = f"/home/gridsan/tmackey/cdvae/conf/data/{test_set_override}.yaml"
-            data_cfg = OmegaConf.load(data_cfg_path)
-
-            # Replace the data portion of the base configuration with the new data configuration
-            base_cfg.data = data_cfg
-
-            print("Data configuration overridden with", test_set_override)
-        
-        cfg = base_cfg
+            cfg = compose(config_name='hparams', overrides=[f"data.root_path=/home/gridsan/tmackey/cdvae/data/{test_set_override}",
+                                                            f"data.eval_model_name={test_set_override}"])
+            print("overriding data with ", test_set_override)
+        else:
+            cfg = compose(config_name='hparams')
         model = hydra.utils.instantiate(
             cfg.model,
             optim=cfg.optim,

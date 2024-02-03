@@ -11,6 +11,7 @@ from cdvae.common.utils import PROJECT_ROOT
 from cdvae.common.data_utils import (
     preprocess, preprocess_tensors, add_scaled_lattice_prop)
 
+import numpy as np
 
 class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
@@ -20,6 +21,7 @@ class CrystDataset(Dataset):
                  train_fraction: ValueNode = 1,
                  max_num_atoms: ValueNode = 20,
                  source: ValueNode = "any",
+                 num_augmented_data: ValueNode = 0,
                  **kwargs):
         super().__init__()
         self.path = path
@@ -33,27 +35,56 @@ class CrystDataset(Dataset):
         self.train_fraction = train_fraction
         self.max_num_atoms = max_num_atoms
         self.source = source
+    
+        self.num_augmented_data = num_augmented_data
 
-        self.cached_data = preprocess(
-            self.path,
-            preprocess_workers,
-            niggli=self.niggli,
-            primitive=self.primitive,
-            graph_method=self.graph_method,
-            train_fraction=self.train_fraction,
-            prop_list=[prop], 
-            max_num_atoms=self.max_num_atoms,
-            source = self.source)
+        if self.num_augmented_data == 0:
+            self.cached_data = preprocess(
+                self.path,
+                preprocess_workers,
+                niggli=self.niggli,
+                primitive=self.primitive,
+                graph_method=self.graph_method,
+                train_fraction=self.train_fraction,
+                prop_list=[prop], 
+                max_num_atoms=self.max_num_atoms,
+                source = self.source)
+            add_scaled_lattice_prop(self.cached_data, lattice_scale_method)
 
-        add_scaled_lattice_prop(self.cached_data, lattice_scale_method)
+        else:
+            self.cached_data = []
+            for i in range(self.num_augmented_data):
+                print('processing augmented data', i)
+                self.cached_data.append(preprocess(
+                                                    self.path,
+                                                    preprocess_workers,
+                                                    niggli=self.niggli,
+                                                    primitive=self.primitive,
+                                                    graph_method=self.graph_method,
+                                                    train_fraction=self.train_fraction,
+                                                    prop_list=[prop], 
+                                                    max_num_atoms=self.max_num_atoms,
+                                                    source = self.source,
+                                                    index = i))
+                
+                add_scaled_lattice_prop(self.cached_data[i], lattice_scale_method)
+        
         self.lattice_scaler = None
         self.scaler = None
 
     def __len__(self) -> int:
-        return len(self.cached_data)
+        if self.num_augmented_data:
+            return len(self.cached_data[0])
+        else:
+            return len(self.cached_data)
 
     def __getitem__(self, index):
-        data_dict = self.cached_data[index]
+        if self.num_augmented_data == 0:
+            data_dict = self.cached_data[index]
+        else:
+            #randomly choose one of indexes from the list
+            dataset_to_choose = self.cached_data[np.random.randint(0, self.num_augmented_data)]
+            data_dict = dataset_to_choose[index]
 
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])

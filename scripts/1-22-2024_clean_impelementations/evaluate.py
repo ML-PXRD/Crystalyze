@@ -87,12 +87,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
                 if model.type_fixing: 
                     force_atom_types = True
                 gt_atom_types = batch.atom_types if force_atom_types else None
-                if gt_num_atoms is not None:
-                    print("using gt_num_atoms")
                 
-                if gt_atom_types is not None:
-                    print("using gt_atom_types")
-                    
                 outputs = model.langevin_dynamics(
                     z, ld_kwargs, gt_num_atoms, gt_atom_types, atom_spec)
 
