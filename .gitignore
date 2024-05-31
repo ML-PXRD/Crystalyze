@@ -251,3 +251,5 @@ scripts/1-19-2024_experimental_data_analysis
 scripts/1-05-2024_experimental_data
 scripts/1-05-2024_experimental_data/1-05-2024_experimental_data_num_evals_xrd.ipynb
 scripts/12-21-2023_deepmind_data/launcher.sh
+scripts/1-22-2024_clean_impelementations
+scripts/XRD_CDVAE/

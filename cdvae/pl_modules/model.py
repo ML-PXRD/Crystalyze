@@ -308,9 +308,12 @@ class CDVAE(BaseModule):
 
         if torch.cuda.is_available():
             self.simple_conv_net = self.simple_conv_net.to(self.device)
-
-        if self.diffraction_convolution:
-            self.diff_conv = nn.Conv1d(in_channels=2, out_channels=1, kernel_size=2, stride=1, padding=0)
+        
+        self.use_composition_module = getattr(self.hparams, 'use_composition_module', False)
+        self.include_stoichiometric_information = getattr(self.hparams, 'include_stoichiometric_information', False)
+        if self.use_composition_module:
+            self.fc_xrd_and_comp = build_mlp(MAX_ATOMIC_NUM + self.hparams.latent_dim, self.hparams.hidden_dim, 
+                3, self.hparams.latent_dim)
 
         self.encoder = hydra.utils.instantiate(
             self.hparams.encoder, num_targets=self.hparams.latent_dim)
@@ -328,30 +331,6 @@ class CDVAE(BaseModule):
                                     self.hparams.fc_num_layers, 6)
         self.fc_composition = build_mlp(self.hparams.latent_dim, self.hparams.hidden_dim,
                                         self.hparams.fc_num_layers, MAX_ATOMIC_NUM)
-        
-        
-        #make an encoders for the diffraction pattern 
-        if self.encode_diffraction_pattern:
-            self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
-                                        self.diffraction_encoder_num_layers, 256)
-        
-        if self.use_cond_kld:
-            self.prior_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
-                                           self.diffraction_encoder_num_layers, 256)
-            self.prior_mu = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
-            self.prior_var = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
-
-
-        #make an encoders for the diffraction pattern 
-        if self.encode_diffraction_pattern:
-            self.post_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
-                                        self.diffraction_encoder_num_layers, 256)
-        
-        if self.use_cond_kld:
-            self.prior_encoder = build_mlp(256*self.number_of_conditionals, self.diffraction_encoder_hidden_dim, 
-                                           self.diffraction_encoder_num_layers, 256)
-            self.prior_mu = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
-            self.prior_var = nn.Linear(self.hparams.latent_dim, self.hparams.latent_dim)
 
         # for property prediction.
         if self.hparams.predict_property:
@@ -412,7 +391,7 @@ class CDVAE(BaseModule):
     #     z = self.reparameterize(mu, log_var)
     #     return mu, log_var, z
     
-    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False, pv_xrd = None):
+    def encode(self, batch, xrd_int, xrd_loc, atom_spec, discrete_simulated_xrd = None, testing = False, pv_xrd = None, multi_hot_encode = None):
         """
         encode diffraction patterns to latents.
         """
@@ -449,7 +428,12 @@ class CDVAE(BaseModule):
                 z = self.reparameterize(mu, log_var)
 
             else:
-                z = pv_xrd_processed
+                hidden = pv_xrd_processed
+                if self.use_composition_module: 
+                    hidden = torch.cat((hidden, multi_hot_encode), dim=1)
+                    z = self.fc_xrd_and_comp(hidden)
+                else:
+                    z = hidden
                 mu = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
                 log_var = torch.zeros(xrd_loc.size(0), self.hparams.latent_dim, device=self.device)
                 
@@ -773,6 +757,44 @@ class CDVAE(BaseModule):
         samples = self.langevin_dynamics(z, ld_kwargs)
         return samples
 
+    def generate_background_noise(self, pv_xrd):
+        mean = np.array([1.06709083, -5.39670499])
+        cov = np.array([[0.19984825, 0.14809546],
+                        [0.14809546, 1.31019437]])
+
+        # Create an instance of a multivariate normal distribution
+        mvn = multivariate_normal(mean, cov)
+
+        # Sample points from the distribution
+        num_samples = 500  # You can change this to your desired number of samples
+        samples = mvn.rvs(size=num_samples)
+
+        #remove any samples with values in the second column greater than ln(0.05)
+        #remove any samples with values in the first column greater than ln(10)
+        samples_filtered = samples[samples[:,1] < np.log(0.05)]
+        samples_filtered = samples_filtered[samples_filtered[:,0] < np.log(10)]
+
+        #take the first 256 
+        samples_filtered = samples_filtered[:pv_xrd.shape[0]]
+
+        #calculate the exponentials of the samples
+        samples_exp = np.exp(samples_filtered)
+
+        a = samples_exp[:, 0]
+        scale = samples_exp[:, 1]
+        #make a gamma distribution for each a and scale
+        gamma_samples = []
+        for i in range(len(a)):
+            gamma_samples.append(gamma(a = a[i], scale = scale[i], loc = 0).rvs(8500))
+        
+        gamma_samples = np.stack(gamma_samples)
+        gamma_samples = torch.tensor(gamma_samples, device=self.device)
+
+        #unsqueeze at the 1st dimension
+        gamma_samples = gamma_samples.unsqueeze(1)
+
+        return gamma_samples
+
     def forward(self, batch, teacher_forcing, training):
 
         batch_reserve = batch
@@ -781,56 +803,23 @@ class CDVAE(BaseModule):
         atom_spec = batch_reserve[3]
         disc_sim_xrd = batch_reserve[4]
         pv_xrd = batch_reserve[5]
+        multi_hot_encoding = batch_reserve[6]
 
+        if not self.include_stoichiometric_information: 
+            multi_hot_encoding = torch.where(multi_hot_encoding > 0, 1, 0)
+        
         #add noise to pv_xrd from normal distribution normal, 1 SD = self.noise_sd
         if self.noise_sd > 0.0:
             pv_xrd = pv_xrd + torch.randn_like(pv_xrd, device=self.device) * self.noise_sd
         elif self.noise_sd == -1:
-            #new 
-            #now, let's try to reproduce the noise using just the parameters of the multivariate normal distribution
-            mean = np.array([1.06709083, -5.39670499])
-            cov = np.array([[0.19984825, 0.14809546],
-                            [0.14809546, 1.31019437]])
-
-            # Create an instance of a multivariate normal distribution
-            mvn = multivariate_normal(mean, cov)
-
-            # Sample points from the distribution
-            num_samples = 500  # You can change this to your desired number of samples
-            samples = mvn.rvs(size=num_samples)
-
-            #remove any samples with values in the second column greater than ln(0.05)
-            #remove any samples with values in the first column greater than ln(10)
-            samples_filtered = samples[samples[:,1] < np.log(0.05)]
-            samples_filtered = samples_filtered[samples_filtered[:,0] < np.log(10)]
-
-            #take the first 256 
-            samples_filtered = samples_filtered[:pv_xrd.shape[0]]
-
-            #calculate the exponentials of the samples
-            samples_exp = np.exp(samples_filtered)
-
-            a = samples_exp[:, 0]
-            scale = samples_exp[:, 1]
-            #make a gamma distribution for each a and scale
-            gamma_samples = []
-            for i in range(len(a)):
-                gamma_samples.append(gamma(a = a[i], scale = scale[i], loc = 0).rvs(8500))
-            
-            gamma_samples = np.stack(gamma_samples)
-            gamma_samples = torch.tensor(gamma_samples, device=self.device)
-
-            #unsqueeze at the 1st dimension
-            gamma_samples = gamma_samples.unsqueeze(1)
-
-            #add the gamma samples to the first 8500 columns of the pv_xrd
+            gamma_samples = self.generate_background_noise(pv_xrd)
             pv_xrd[:, :8500] = pv_xrd[:, :8500] + gamma_samples
 
         batch = batch[0]
         
         mu, log_var, z = self.encode(batch, xrd_int, xrd_loc, atom_spec,
                                       discrete_simulated_xrd = disc_sim_xrd, 
-                                      pv_xrd = pv_xrd)
+                                      pv_xrd = pv_xrd, testing = False, multi_hot_encode = multi_hot_encoding)
         kld_loss = self.kld_loss(mu, log_var)
 
         # if self.use_cond_kld:
@@ -846,7 +835,6 @@ class CDVAE(BaseModule):
         pred_composition_per_atom) = self.decode_stats(
             z, batch.num_atoms, batch.lengths, batch.angles, teacher_forcing, gt_elements)
         
-
         # sample noise levels.
         noise_level = torch.randint(0, self.sigmas.size(0),
                                     (batch.num_atoms.size(0),),

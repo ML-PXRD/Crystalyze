@@ -1,0 +1,2 @@
+Executing: sbatch --job-name="Freedman_lab_diffraction_for_Tsach_newly_subtracted"              --output="output/Freedman_lab_diffraction_for_Tsach_newly_subtracted_%j_output.txt"              --error="error/Freedman_lab_diffraction_for_Tsach_newly_subtracted_%j_error.txt"              --export=ALL              my_python_runner_gpu_eval.sh "/home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf" "64" "False" "64" "Freedman_lab_diffraction_for_Tsach_newly_subtracted" "Freedman_lab_diffraction_for_Tsach_newly_subtracted" "False" 
+Submitted batch job 25644341

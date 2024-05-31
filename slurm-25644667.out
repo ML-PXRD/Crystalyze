@@ -1,0 +1,2 @@
+Executing: sbatch --job-name="CoBi"              --output="output/CoBi_%j_output.txt"              --error="error/CoBi_%j_error.txt"              --export=ALL              my_python_runner_gpu_eval.sh "/home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf" "64" "False" "64" "CoBi" "CoBi" "False" 
+Submitted batch job 25644668
