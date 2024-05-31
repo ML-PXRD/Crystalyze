@@ -723,6 +723,17 @@ def compound_restriction(df, name = "batch_82_0_20"):
     else: 
         print("no filter")
         return df
+    
+def multi_hot_encode(atomic_numbers):
+    # Initialize a 100-dimensional tensor with zeros
+    tensor = np.zeros(100, dtype=int)
+    
+    # Iterate over atomic numbers and increment the corresponding index in the tensor
+    for num in atomic_numbers:
+        if 0 < num <= 100:  # Check to ensure the atomic number is within the valid range
+            tensor[num-1] += 1  # Subtract 1 to match index (0-based indexing)
+    
+    return tensor
 
 def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                train_fraction, 
@@ -782,6 +793,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
     try: 
         start = time.time()
+        ### THIS CODE IS DEPECIATED, WILL DEFAULT TO THE EXCEPTION. WILL REMOVE IN FUTURE VERSIONS
         xrd_peak_intensities_dict = torch.load(input_file[:-4] + "_xrd_peak_intensities_dict.pt")
         xrd_peak_locations_dict = torch.load(input_file[:-4] + "_xrd_peak_locations_dict.pt")
         atomic_species_dict = torch.load(input_file[:-4] + "_atomic_numbers_dict.pt")
@@ -805,6 +817,8 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         end = time.time()
         print("xrd, atomic species, and disc sim xrd dicts preloaded")
         print("time taken: {}".format(end-start))
+
+        ### THIS CODE IS DEPECIATED
     
     #the following is the old code for getting the xrd information from the csv, will take 2-10 extra minutes 
     except Exception as e: 
@@ -818,6 +832,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
 
         #disc sim xrd and atomic numbers need special additional steps
         df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
+        df['atomic_numbers_multi_hot_encoding'] = df['atomic_numbers'].apply(multi_hot_encode)
         df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(set(x)))
         df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
 
@@ -831,6 +846,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
         xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
         atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
         disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
+        multi_hot_encoding = torch.stack([torch.tensor(x) for x in df['atomic_numbers_multi_hot_encoding']])
 
         pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
 
@@ -848,6 +864,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                                         'atomic_species': atomic_species[i], 
                                         'disc_sim_xrd': disc_sim_xrd[i], 
                                         'pv_xrd': pv_xrd_dict[adjusted_materials_id],
+                                        'multi_hot_encoding': multi_hot_encoding[i],
                                         'graph_arrays': graph_dict[materials_id]})
                 
                 for prop in prop_list:
@@ -868,6 +885,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                                             'atomic_species': atomic_species[i], 
                                             'disc_sim_xrd': disc_sim_xrd[i], 
                                             'pv_xrd': pv_xrd_dict[adjusted_materials_id],
+                                            'multi_hot_encoding': multi_hot_encoding[i],
                                             'graph_arrays': graph_dict[materials_id]})
                     
                     for prop in prop_list:
@@ -879,6 +897,7 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                                         'atomic_species': atomic_species[i], 
                                         'disc_sim_xrd': disc_sim_xrd[i], 
                                         'pv_xrd': pv_xrd_dict[materials_id],
+                                        'multi_hot_encoding': multi_hot_encoding[i],
                                         'graph_arrays': graph_dict[materials_id]})
                 
                 for prop in prop_list:

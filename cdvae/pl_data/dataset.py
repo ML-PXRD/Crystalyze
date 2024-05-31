@@ -12,7 +12,6 @@ from cdvae.common.data_utils import (
     preprocess, preprocess_tensors, add_scaled_lattice_prop)
 
 import numpy as np
-
 class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
                  prop: ValueNode, niggli: ValueNode, primitive: ValueNode,
@@ -94,7 +93,13 @@ class CrystDataset(Dataset):
         xrd_locations = data_dict['xrd_locations']
         atomic_species = data_dict['atomic_species']
         disc_sim_xrd = data_dict['disc_sim_xrd']
+        multi_hot_encoding = data_dict['multi_hot_encoding']
         pv_xrd = data_dict['pv_xrd']
+
+        #0 out the first 1000 columns of pv_xrd. This makes the actual 2theta range 15-90
+        pv_xrd[:, :1000] = 0
+        # pv_xrd[:, -2000:] = 0
+
         # print(xrd_intensities)
         # print(xrd_locations)
         # print(atomic_species)
@@ -119,7 +124,7 @@ class CrystDataset(Dataset):
         # print(xrd_locations)
         # print(atomic_species)
         # print(disc_sim_xrd)
-        return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd, pv_xrd
+        return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd, pv_xrd, multi_hot_encoding
 
     def __repr__(self) -> str:
         return f"CrystDataset({self.name=}, {self.path=})"

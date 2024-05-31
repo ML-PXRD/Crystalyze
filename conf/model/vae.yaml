@@ -12,6 +12,8 @@ in_dim: 8500
 noise_sd: ${data.noise_sd}
 apply_conv_to_peak_loc_int: false
 use_weight_initialization: true
+use_composition_module: false
+include_stoichiometric_information: false
 
 ### START : OLD PARAMETERS (NOT IN DEVELOPMENT) 
 use_cond_kld: false

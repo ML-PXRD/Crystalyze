@@ -10,7 +10,7 @@ from torch_geometric.data import Batch
 
 from eval_utils import load_model
 from torch.nn import functional as F
-
+import os
 import numpy as np
 
 def new_dataloader_batch_processor(batch): 
@@ -21,8 +21,9 @@ def new_dataloader_batch_processor(batch):
     batch = batch[0]
     disc_sim_xrd = batch_reserve[4]
     pv_xrd = batch_reserve[5]
+    multi_hot_encode = batch_reserve[6]
 
-    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd
+    return batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd, multi_hot_encode
 
 def reconstructon(loader, model, ld_kwargs, num_evals,
                   force_num_atoms=False, force_atom_types=False, down_sample_traj_step=1, num_batches=15):
@@ -49,7 +50,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
 
     for idx, batch in enumerate(loader):
         if idx in batch_indices_to_use:
-            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd = new_dataloader_batch_processor(batch)
+            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd, multi_hot_encoding = new_dataloader_batch_processor(batch)
 
             #put everything on the gpu
             xrd_int = xrd_int.cuda()
@@ -58,6 +59,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             disc_sim_xrd = disc_sim_xrd.cuda()
             batch = batch.cuda()
             pv_xrd = pv_xrd.cuda()
+            multi_hot_encoding = multi_hot_encoding.cuda()
 
             print(idx)
             print(batch)
@@ -74,7 +76,7 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
             for eval_idx in range(num_evals):
-                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd)
+                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd, multi_hot_encode = multi_hot_encoding)
 
                 #predict the property 
                 try: 
@@ -284,6 +286,21 @@ def main(args):
             'time': time.time() - start_time
         }, model_path / recon_out_name)
 
+        shared_model_path = model_path.replace("hydra", "Freedman_CDVAE_shared/hydra")
+        os.makedirs(shared_model_path, exist_ok=True)
+
+        torch.save({
+            'eval_setting': args,
+            'frac_coords': frac_coords,
+            'num_atoms': num_atoms,
+            'atom_types': atom_types,
+            'lengths': lengths,
+            'angles': angles,
+            'all_frac_coords_stack': all_frac_coords_stack,
+            'all_atom_types_stack': all_atom_types_stack,
+            'time': time.time() - start_time
+        }, shared_model_path / gen_out_name)
+
     if 'gen' in args.tasks:
         print('Evaluate model on the generation task.')
         start_time = time.time()
@@ -309,6 +326,21 @@ def main(args):
             'all_atom_types_stack': all_atom_types_stack,
             'time': time.time() - start_time
         }, model_path / gen_out_name)
+
+        shared_model_path = model_path.replace("hydra", "Freedman_CDVAE_shared/hydra")
+        os.makedirs(shared_model_path, exist_ok=True)
+
+        torch.save({
+            'eval_setting': args,
+            'frac_coords': frac_coords,
+            'num_atoms': num_atoms,
+            'atom_types': atom_types,
+            'lengths': lengths,
+            'angles': angles,
+            'all_frac_coords_stack': all_frac_coords_stack,
+            'all_atom_types_stack': all_atom_types_stack,
+            'time': time.time() - start_time
+        }, shared_model_path / gen_out_name)
 
     if 'opt' in args.tasks:
         print('Evaluate model on the property optimization task.')
