@@ -1,0 +1,13 @@
+model_path: "/home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf"
+type: "PDF_filtered_raw"
+data_path_template: "/home/gridsan/tmackey/cdvae/data/{type}"
+subfolder_results_dir: "PDF_large_scale/filtered_raw"
+master_results_dir_template: "/home/gridsan/tmackey/Freedman_CDVAE_shared/{type}"
+data_name: "{type}"
+input_patterns_file: "test_pv_xrd.pt"
+num_evals: 64
+wavelength: 1.54184
+q_max: 5.76722732255
+q_min: 0.355794747244
+num_steps: 850
+iterations: 3

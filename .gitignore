@@ -252,4 +252,15 @@ scripts/1-05-2024_experimental_data
 scripts/1-05-2024_experimental_data/1-05-2024_experimental_data_num_evals_xrd.ipynb
 scripts/12-21-2023_deepmind_data/launcher.sh
 scripts/1-22-2024_clean_impelementations
-scripts/XRD_CDVAE/
+
+scripts/XRD_CDVAE/PDF_large_scale/bot_XML
+scripts/XRD_CDVAE/Freedman_Lab_Compounds/Archive
+scripts/XRD_CDVAE/Freedman_Lab_Compounds/data
+scripts/XRD_CDVAE/PDF_large_scale/data
+scripts/XRD_CDVAE/PDF_large_scale/archive
+scripts/XRD_CDVAE/RRUFF/data
+scripts/XRD_CDVAE/RRUFF/archive
+scripts/XRD_CDVAE/RRUFF/ckpt
+scripts/XRD_CDVAE/archive
+scripts/XRD_CDVAE/result_data
+scripts/XRD_CDVAE/MP_20_Testing/result_data
