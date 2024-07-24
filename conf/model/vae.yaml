@@ -34,7 +34,6 @@ wavelength : 1.5406
 q_max :  8
 q_min : 0.5
 num_steps : 200
-### END : OLD PARAMETERS (NOT IN DEVELOPMENT) 
 
 hidden_dim: 256
 latent_dim: 256
@@ -60,6 +59,7 @@ type_sigma_end: 0.01
 num_noise_level: 50
 predict_property: False
 
+### END : OLD PARAMETERS (NOT IN DEVELOPMENT) 
 
 defaults:
   - encoder: dimenet

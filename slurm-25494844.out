@@ -1,2 +1,0 @@
-Executing: sbatch --job-name="Freedman_lab_round_3_Tr"              --output="output/Freedman_lab_round_3_Tr_%j_output.txt"              --error="error/Freedman_lab_round_3_Tr_%j_error.txt"              --export=ALL              my_python_runner_gpu_eval.sh "/home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf" "1" "True" "64" "Freedman_lab_round_3_Tr" "Freedman_lab_round_3_Tr" "True" 
-Submitted batch job 25494853
