@@ -239,8 +239,6 @@ notebooks/Dev/
 #any data in notebooks
 notebooks/*/data/
 
-.vscode/
-
 env.cpu.yml
 env_diff.yml
 env_cdvae.yml
