@@ -240,3 +240,7 @@ notebooks/Dev/
 notebooks/*/data/
 
 .vscode/
+
+env.cpu.yml
+env_diff.yml
+env_cdvae.yml
