@@ -238,3 +238,5 @@ cdvae/Dev/
 notebooks/Dev/
 #any data in notebooks
 notebooks/*/data/
+
+.vscode/
