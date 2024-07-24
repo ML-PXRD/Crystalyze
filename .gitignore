@@ -226,41 +226,15 @@ output/
 #data folder
 data/
 
-#LLM data in scripts 
-scripts/LLM_data/
-
-scripts/12-05-2023_dataset_size/archive
-scripts/12-05-2023_dataset_size/archive2
-
-scripts/12-21-2023_graph_preloading/output
-scripts/12-21-2023_graph_preloading/error
-
-scripts/1-06-2024_augmentation/XRDs
-scripts/1-06-2024_augmentation/proper_data_pipeline_data
-
-scripts/1-05-2024_experimental_data/multiple_evals_results/
-scripts/1-08-2024_deepmind_data_convnet_model/proper_data_pipeline_data
-
-scripts/1-13-2024_RUFF_data
+#checkpointed XRD encoders
 cdvae/pl_modules/model_final_8192.pth
 cdvae/pl_modules/model_final_8500.pth
 cdvae/pl_modules/model_final.pth
-scripts/1-05-2024_experimental_data/predicted_structure_0.cif
-scripts/12-21-2023_deepmind_data
-scripts/1-19-2024_experimental_data_analysis
-scripts/1-05-2024_experimental_data
-scripts/1-05-2024_experimental_data/1-05-2024_experimental_data_num_evals_xrd.ipynb
-scripts/12-21-2023_deepmind_data/launcher.sh
-scripts/1-22-2024_clean_impelementations
 
-scripts/XRD_CDVAE/PDF_large_scale/bot_XML
-scripts/XRD_CDVAE/Freedman_Lab_Compounds/Archive
-scripts/XRD_CDVAE/Freedman_Lab_Compounds/data
-scripts/XRD_CDVAE/PDF_large_scale/data
-scripts/XRD_CDVAE/PDF_large_scale/archive
-scripts/XRD_CDVAE/RRUFF/data
-scripts/XRD_CDVAE/RRUFF/archive
-scripts/XRD_CDVAE/RRUFF/ckpt
-scripts/XRD_CDVAE/archive
-scripts/XRD_CDVAE/result_data
-scripts/XRD_CDVAE/MP_20_Testing/result_data
+#anything in cdvae/Dev
+cdvae/Dev/
+
+#anything in notebooks/Dev
+notebooks/Dev/
+#any data in notebooks
+notebooks/*/data/
