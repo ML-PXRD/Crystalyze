@@ -4,7 +4,7 @@ This repository contains the code and resources for the Crystalyze project.
 
 ## Overview
 
-Crystalyze is a machine learning model that combines XRD representation learning with a conditional variational autoencoder (CDVAE) to generate crytal structures given an x-ray diffraction pattern. 
+Crystalyze is a machine learning model that combines XRD representation learning with a crystal diffusion variational autoencoder (CDVAE) to generate crytal structures given an x-ray diffraction pattern. 
 
 ## Installation
 
