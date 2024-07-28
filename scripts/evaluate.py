@@ -140,9 +140,11 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
         frac_coords, num_atoms, atom_types, lengths, angles,
         all_frac_coords_stack, all_atom_types_stack, predicted_property, input_data_batch)
 
-
-def generation(model, ld_kwargs, num_batches_to_sample, num_samples_per_z,
-               batch_size=512, down_sample_traj_step=1):
+def generation(loader, model, ld_kwargs, num_evals,
+                  force_num_atoms=False, force_atom_types=False, down_sample_traj_step=1, num_batches=15):
+    """
+    reconstruct the crystals in <loader>.
+    """
     all_frac_coords_stack = []
     all_atom_types_stack = []
     frac_coords = []
@@ -150,53 +152,106 @@ def generation(model, ld_kwargs, num_batches_to_sample, num_samples_per_z,
     atom_types = []
     lengths = []
     angles = []
+    predicted_property = []
+    input_data_list = []
 
-    for z_idx in range(num_batches_to_sample):
-        batch_all_frac_coords = []
-        batch_all_atom_types = []
-        batch_frac_coords, batch_num_atoms, batch_atom_types = [], [], []
-        batch_lengths, batch_angles = [], []
+    if num_batches < len(loader):
+        #randomly sample num_batches indices from 0 to len(loader)
+        rng = np.random.default_rng(seed=42) # want to have the batch indices be the same between evals
+        batch_indices_to_use = rng.choice(len(loader), num_batches, replace=False)
+        print("using batch indices: ", batch_indices_to_use)
+    else:
+        batch_indices_to_use = range(len(loader))
 
-        z = torch.randn(batch_size, model.hparams.hidden_dim,
-                        device=model.device)
+    for idx, batch in enumerate(loader):
+        if idx in batch_indices_to_use:
+            batch_reserve, xrd_int, xrd_loc, atom_spec, batch, disc_sim_xrd, pv_xrd, multi_hot_encoding = new_dataloader_batch_processor(batch)
 
-        for sample_idx in range(num_samples_per_z):
-            samples = model.langevin_dynamics(z, ld_kwargs)
+            #put everything on the gpu
+            xrd_int = xrd_int.cuda()
+            xrd_loc = xrd_loc.cuda()
+            atom_spec = atom_spec.cuda()
+            disc_sim_xrd = disc_sim_xrd.cuda()
+            batch = batch.cuda()
+            pv_xrd = pv_xrd.cuda()
+            multi_hot_encoding = multi_hot_encoding.cuda()
 
-            # collect sampled crystals in this batch.
-            batch_frac_coords.append(samples['frac_coords'].detach().cpu())
-            batch_num_atoms.append(samples['num_atoms'].detach().cpu())
-            batch_atom_types.append(samples['atom_types'].detach().cpu())
-            batch_lengths.append(samples['lengths'].detach().cpu())
-            batch_angles.append(samples['angles'].detach().cpu())
+            print(f'batch {idx} in {len(loader)}')
+            batch_all_frac_coords = []
+            batch_all_atom_types = []
+            batch_frac_coords, batch_num_atoms, batch_atom_types = [], [], []
+            batch_lengths, batch_angles = [], []
+            batch_predicted_property = []
+
+            for eval_idx in range(num_evals):
+                _, _, z = model.encode(None, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd, multi_hot_encode = multi_hot_encoding)
+
+                #predict the property 
+                try: 
+                    property = model.fc_property(z)
+                    print("property: ", property)
+                except:
+                    property = torch.tensor([0.0])
+                
+                gt_num_atoms = batch.num_atoms if force_num_atoms else None
+                if model.type_fixing: 
+                    force_atom_types = True
+                gt_atom_types = batch.atom_types if force_atom_types else None
+                if gt_num_atoms is not None:
+                    print("using gt_num_atoms")
+                
+                if gt_atom_types is not None:
+                    print("using gt_atom_types")
+                    
+                outputs = model.langevin_dynamics(
+                    z, ld_kwargs, gt_num_atoms, gt_atom_types, atom_spec)
+
+                # collect sampled crystals in this batch.
+                batch_frac_coords.append(outputs['frac_coords'].detach().cpu())
+                batch_num_atoms.append(outputs['num_atoms'].detach().cpu())
+                batch_atom_types.append(outputs['atom_types'].detach().cpu())
+                batch_lengths.append(outputs['lengths'].detach().cpu())
+                batch_angles.append(outputs['angles'].detach().cpu())
+                batch_predicted_property.append(property.detach().cpu())
+
+                if ld_kwargs.save_traj:
+                    batch_all_frac_coords.append(
+                        outputs['all_frac_coords'][::down_sample_traj_step].detach().cpu())
+                    batch_all_atom_types.append(
+                        outputs['all_atom_types'][::down_sample_traj_step].detach().cpu())
+                    
+            # collect sampled crystals for this z.
+            frac_coords.append(torch.stack(batch_frac_coords, dim=0))
+            num_atoms.append(torch.stack(batch_num_atoms, dim=0))
+            atom_types.append(torch.stack(batch_atom_types, dim=0))
+            lengths.append(torch.stack(batch_lengths, dim=0))
+            angles.append(torch.stack(batch_angles, dim=0))
+            predicted_property.append(torch.stack(batch_predicted_property, dim=0))
+
             if ld_kwargs.save_traj:
-                batch_all_frac_coords.append(
-                    samples['all_frac_coords'][::down_sample_traj_step].detach().cpu())
-                batch_all_atom_types.append(
-                    samples['all_atom_types'][::down_sample_traj_step].detach().cpu())
+                all_frac_coords_stack.append(
+                    torch.stack(batch_all_frac_coords, dim=0))
+                all_atom_types_stack.append(
+                    torch.stack(batch_all_atom_types, dim=0))
 
-        # collect sampled crystals for this z.
-        frac_coords.append(torch.stack(batch_frac_coords, dim=0))
-        num_atoms.append(torch.stack(batch_num_atoms, dim=0))
-        atom_types.append(torch.stack(batch_atom_types, dim=0))
-        lengths.append(torch.stack(batch_lengths, dim=0))
-        angles.append(torch.stack(batch_angles, dim=0))
-        if ld_kwargs.save_traj:
-            all_frac_coords_stack.append(
-                torch.stack(batch_all_frac_coords, dim=0))
-            all_atom_types_stack.append(
-                torch.stack(batch_all_atom_types, dim=0))
+            # Save the ground truth structure
+            input_data_list = input_data_list + batch.to_data_list()
 
     frac_coords = torch.cat(frac_coords, dim=1)
     num_atoms = torch.cat(num_atoms, dim=1)
     atom_types = torch.cat(atom_types, dim=1)
     lengths = torch.cat(lengths, dim=1)
     angles = torch.cat(angles, dim=1)
+    predicted_property = torch.cat(predicted_property, dim=1)
+
     if ld_kwargs.save_traj:
         all_frac_coords_stack = torch.cat(all_frac_coords_stack, dim=2)
         all_atom_types_stack = torch.cat(all_atom_types_stack, dim=2)
-    return (frac_coords, num_atoms, atom_types, lengths, angles,
-            all_frac_coords_stack, all_atom_types_stack)
+    input_data_batch = Batch.from_data_list(input_data_list)
+
+    return (
+        frac_coords, num_atoms, atom_types, lengths, angles,
+        all_frac_coords_stack, all_atom_types_stack, predicted_property, input_data_batch)
 
 
 def main(args):
