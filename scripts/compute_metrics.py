@@ -105,7 +105,6 @@ xrd_calculator = XRDCalculator(wavelength='CuKa', symprec=0.1)
 from pymatgen.io.cif import CifWriter
 import pandas as pd
 class RecEval(object):
-
     def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3): #original values of stol=0.5, angle_tol=10, ltol=0.3
         assert len(pred_crys) == len(gt_crys)
         self.matcher = StructureMatcher(

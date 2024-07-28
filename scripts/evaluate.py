@@ -61,9 +61,6 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             pv_xrd = pv_xrd.cuda()
             multi_hot_encoding = multi_hot_encoding.cuda()
 
-            print(idx)
-            print(batch)
-
             if torch.cuda.is_available():
                 batch.cuda()
             print(f'batch {idx} in {len(loader)}')
@@ -72,8 +69,6 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch_frac_coords, batch_num_atoms, batch_atom_types = [], [], []
             batch_lengths, batch_angles = [], []
             batch_predicted_property = []
-
-            #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
 
             for eval_idx in range(num_evals):
                 _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd, multi_hot_encode = multi_hot_encoding)
@@ -202,38 +197,6 @@ def generation(model, ld_kwargs, num_batches_to_sample, num_samples_per_z,
         all_atom_types_stack = torch.cat(all_atom_types_stack, dim=2)
     return (frac_coords, num_atoms, atom_types, lengths, angles,
             all_frac_coords_stack, all_atom_types_stack)
-
-
-def optimization(model, ld_kwargs, data_loader,
-                 num_starting_points=100, num_gradient_steps=5000,
-                 lr=1e-3, num_saved_crys=10):
-    if data_loader is not None:
-        batch = next(iter(data_loader)).to(model.device)
-        batch_reserve, xrd_int, xrd_loc, atom_spec, batch = new_dataloader_batch_processor(batch)
-        _, _, z = model.encode(batch)
-        z = z[:num_starting_points].detach().clone()
-        z.requires_grad = True
-    else:
-        z = torch.randn(num_starting_points, model.hparams.hidden_dim,
-                        device=model.device)
-        z.requires_grad = True
-
-    opt = Adam([z], lr=lr)
-    model.freeze()
-
-    all_crystals = []
-    interval = num_gradient_steps // (num_saved_crys-1)
-    for i in tqdm(range(num_gradient_steps)):
-        opt.zero_grad()
-        loss = model.fc_property(z).mean()
-        loss.backward()
-        opt.step()
-
-        if i % interval == 0 or i == (num_gradient_steps-1):
-            crystals = model.langevin_dynamics(z, ld_kwargs)
-            all_crystals.append(crystals)
-    return {k: torch.cat([d[k] for d in all_crystals]).unsqueeze(0) for k in
-            ['frac_coords', 'atom_types', 'num_atoms', 'lengths', 'angles']}
 
 
 def main(args):

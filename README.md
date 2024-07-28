@@ -18,4 +18,3 @@ To use Crystalyze, follow these steps:
 
 To train and use the Crystalyze, refer to the following instructions:
 
-TODO: Add instructions and formalize the preprocessing and training steps 
