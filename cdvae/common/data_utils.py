@@ -17,9 +17,9 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score
 from torch_scatter import scatter
 
 from p_tqdm import p_umap
+from typing import Literal, List, Optional, Tuple, Dict 
 
 import ast
-#import the random function library
 import random
 import os 
 import time
@@ -651,22 +651,6 @@ def get_scaler_from_data_list(data_list, key):
     scaler.fit(targets)
     return scaler
 
-### Old code made by Tsach ### 
-# def convert_to_floats(s: str) -> list:
-#     # Removing brackets and stripping spaces
-#     cleaned_str = s.strip().replace("[", "").replace("]", "").strip()
-
-#     # Splitting by space
-#     parts = cleaned_str.split()
-
-#     # Parsing each part
-#     numbers = []
-#     for part in parts:
-#         # Splitting by comma and converting each substring to float
-#         numbers.extend([float(num_str) for num_str in part.split(",") if num_str])
-
-#     return numbers
-
 def num_atoms_restriction(df, max_num_atoms):
     atomic_num_list = df['atomic_numbers'].apply(ast.literal_eval)
     num_atoms = [len(x) for x in atomic_num_list]
@@ -735,51 +719,36 @@ def multi_hot_encode(atomic_numbers):
     
     return tensor
 
-def preprocess(input_file, num_workers, niggli, primitive, graph_method,
-               train_fraction, 
-               prop_list, max_num_atoms = 20, source = "any", index = None):
+def preprocess(input_file: str, 
+               train_fraction: float, 
+               prop_list: List[str], 
+               task: Literal['reconstruction', 'generation'], 
+               index: Optional[int] = None) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    """
+    Preprocesses the input data for training or generation.
 
-    print("constraints are max_num_atoms = {} and source = {}".format(max_num_atoms, source))
+    Args:
+        input_file (str): The path to the input file.
+        train_fraction (float): The fraction of data to use for training.
+        prop_list (List[str]): The list of properties to include in the output.
+        task (Literal['reconstruction', 'generation']): The task to perform, either 'reconstruction' or 'generation'.
+        index (Optional[int], optional): The index to use for subsectioning the training data. Defaults to None.
 
-    df_file_name = input_file[:-4] + "_" + str(max_num_atoms) + "_" + source + ".csv"
-    graph_file_name = input_file[:-4] + "_" + str(max_num_atoms) + "_" + source + ".pt"
+    Returns:
+        Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]: A tuple containing two dictionaries. The first dictionary contains the input features, and the second dictionary contains the output properties.
+    """
+    df_file_name = input_file[:-4] + ".csv"
+    graph_file_name = input_file[:-4] + ".pt"
 
-    #look for the file in the directory
-    if os.path.isfile(df_file_name) and os.path.isfile(graph_file_name):
-        print("using existing csv file ", df_file_name)
-        df = pd.read_csv(df_file_name)
+    print("using existing csv file ", df_file_name)
+    df = pd.read_csv(df_file_name)
 
+    if task == 'reconstruction':
         print("using existing graph file ", graph_file_name)
         graph_dict = torch.load(graph_file_name)
-    
     else:
-
-        print("creating new csv file ", df_file_name)
-        df = pd.read_csv(input_file)
-
-        df = num_atoms_restriction(df, max_num_atoms)
-        print("using {} rows after imposing a restriction on the number of atoms".format(len(df)))
-
-        df = source_restriction(df, source)
-        print("using {} rows after imposing a restriction on the source".format(len(df)))
-
-        # df.to_csv(df_file_name)
-        # print("saved dataframe to csv file ", df_file_name)
-
-        pt_file_path = input_file[:-4] + ".pt"
-        graph_dict = torch.load(pt_file_path)
-
-        #make a new dictionary with only entries that have keys in the material_id column of the dataframe
-        sub_graph_dict = {key: graph_dict[key] for key in df['material_id'].tolist()}
-
-        # #save the new dictionary to a pt file
-        # torch.save(sub_graph_dict, graph_file_name)
-        # print("saved graph dictionary to pt file ", graph_file_name)
-
-    #impose a restriction eliminating a few compounds that are causing problems
-    compounds_to_remove = ""
-    df = compound_restriction(df, name = compounds_to_remove)
-
+        graph_dict = None
+    
     n = round(len(df)*train_fraction)
     #allow for subsectioning of training data - used for data size impact studies 
     if train_fraction < 1: # if train_fraction is 1 and the code below is used, it'll shuffle    
@@ -790,73 +759,61 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
     prop_dictionary = {}
     for prop in prop_list:
         prop_dictionary[prop] = df[prop].values.astype(np.float32)
+    
+    start = time.time()
+    features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
 
-    try: 
-        start = time.time()
-        ### THIS CODE IS DEPECIATED, WILL DEFAULT TO THE EXCEPTION. WILL REMOVE IN FUTURE VERSIONS
-        xrd_peak_intensities_dict = torch.load(input_file[:-4] + "_xrd_peak_intensities_dict.pt")
-        xrd_peak_locations_dict = torch.load(input_file[:-4] + "_xrd_peak_locations_dict.pt")
-        atomic_species_dict = torch.load(input_file[:-4] + "_atomic_numbers_dict.pt")
-        disc_sim_xrd_dict = torch.load(input_file[:-4] + "_disc_sim_xrd_dict.pt")
-        pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
-        
-        #merge everything into a list of dictionaries
-        ordered_results = []
-        for i in range(len(df)):
-            materials_id = df['material_id'].iloc[i]
+    for feature in features: 
+        df[feature] = df[feature].apply(ast.literal_eval)
+
+    #disc sim xrd and atomic numbers need special additional steps
+    df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
+    df['atomic_numbers_multi_hot_encoding'] = df['atomic_numbers'].apply(multi_hot_encode)
+    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(x))
+    df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
+
+    features.append("disc_sim_xrd")
+    features.append("atomic_numbers")
+
+    for feature in features:
+        df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
+
+    xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
+    xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
+    atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
+    disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
+    multi_hot_encoding = torch.stack([torch.tensor(x) for x in df['atomic_numbers_multi_hot_encoding']])
+
+    pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
+
+    #merge everything into a list of dictionaries
+    ordered_results = []
+    for i in range(len(df)):
+        materials_id = df['material_id'].iloc[i]
+
+        if index is not None:
+            peak_shape = index
+            adjusted_materials_id = materials_id + "_" + str(peak_shape)
             #all list orders except for graph_arrays should have bene preserved 
-            ordered_results.append({'xrd_intensities': xrd_peak_intensities_dict[materials_id][0],
-                                    'xrd_locations': xrd_peak_locations_dict[materials_id][0], 
-                                    'atomic_species': atomic_species_dict[materials_id][0], 
-                                    'disc_sim_xrd': disc_sim_xrd_dict[materials_id][0], 
-                                    'pv_xrd': pv_xrd_dict[materials_id],
-                                    'graph_arrays': graph_dict[materials_id]})
+            ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                    'xrd_locations': xrd_locations[i], 
+                                    'atomic_species': atomic_species[i], 
+                                    'disc_sim_xrd': disc_sim_xrd[i], 
+                                    'pv_xrd': pv_xrd_dict[adjusted_materials_id],
+                                    'multi_hot_encoding': multi_hot_encoding[i],
+                                    'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
+            
             for prop in prop_list:
                 ordered_results[i][prop] = prop_dictionary[prop][i]
-        
-        end = time.time()
-        print("xrd, atomic species, and disc sim xrd dicts preloaded")
-        print("time taken: {}".format(end-start))
 
-        ### THIS CODE IS DEPECIATED
-    
-    #the following is the old code for getting the xrd information from the csv, will take 2-10 extra minutes 
-    except Exception as e: 
-        print(e)
-        
-        start = time.time()
-        features = ['xrd_peak_locations', 'xrd_peak_intensities', 'atomic_numbers']
+        elif "mp_20_aug_cag" in input_file or "mp_20_final" in input_file:
+            num_peaks = 0
+            if "mp_20_aug_cag" in input_file:
+                num_peaks = 4
+            elif "mp_20_final" in input_file:
+                num_peaks = 1
 
-        for feature in features: 
-            df[feature] = df[feature].apply(ast.literal_eval)
-
-        #disc sim xrd and atomic numbers need special additional steps
-        df['disc_sim_xrd'] = df['disc_sim_xrd'].apply(lambda x: [float(val) for val in x[1:-1].split() if val])
-        df['atomic_numbers_multi_hot_encoding'] = df['atomic_numbers'].apply(multi_hot_encode)
-        df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: list(set(x)))
-        df['atomic_numbers'] = df['atomic_numbers'].apply(lambda x: random.sample(x, len(x)))
-
-        features.append("disc_sim_xrd")
-        features.append("atomic_numbers")
-
-        for feature in features:
-            df[feature] = df[feature].apply(lambda x: (x + [0]*256)[:256])
-
-        xrd_intensities = torch.stack([torch.tensor(x) for x in df['xrd_peak_intensities']])
-        xrd_locations = torch.stack([torch.tensor(x) for x in df['xrd_peak_locations']])
-        atomic_species = torch.stack([torch.tensor(x) for x in df['atomic_numbers']])
-        disc_sim_xrd = torch.stack([torch.tensor(x) for x in df['disc_sim_xrd']])
-        multi_hot_encoding = torch.stack([torch.tensor(x) for x in df['atomic_numbers_multi_hot_encoding']])
-
-        pv_xrd_dict = torch.load(input_file[:-4] + "_pv_xrd.pt")
-
-        #merge everything into a list of dictionaries
-        ordered_results = []
-        for i in range(len(df)):
-            materials_id = df['material_id'].iloc[i]
-
-            if index is not None:
-                peak_shape = index
+            for peak_shape in range(num_peaks):
                 adjusted_materials_id = materials_id + "_" + str(peak_shape)
                 #all list orders except for graph_arrays should have bene preserved 
                 ordered_results.append({'xrd_intensities': xrd_intensities[i],
@@ -865,49 +822,26 @@ def preprocess(input_file, num_workers, niggli, primitive, graph_method,
                                         'disc_sim_xrd': disc_sim_xrd[i], 
                                         'pv_xrd': pv_xrd_dict[adjusted_materials_id],
                                         'multi_hot_encoding': multi_hot_encoding[i],
-                                        'graph_arrays': graph_dict[materials_id]})
-                
+                                        'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
                 for prop in prop_list:
-                    ordered_results[i][prop] = prop_dictionary[prop][i]
+                    ordered_results[len(ordered_results) - 1][prop] = prop_dictionary[prop][i]
+        else:
+            #all list orders except for graph_arrays should have bene preserved 
+            ordered_results.append({'xrd_intensities': xrd_intensities[i],
+                                    'xrd_locations': xrd_locations[i], 
+                                    'atomic_species': atomic_species[i], 
+                                    'disc_sim_xrd': disc_sim_xrd[i], 
+                                    'pv_xrd': pv_xrd_dict[materials_id],
+                                    'multi_hot_encoding': multi_hot_encoding[i],
+                                    'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
+            
+            for prop in prop_list:
+                ordered_results[i][prop] = prop_dictionary[prop][i]
 
-            elif "mp_20_aug_cag" in input_file or "mp_20_final" in input_file:
-                num_peaks = 0
-                if "mp_20_aug_cag" in input_file:
-                    num_peaks = 4
-                elif "mp_20_final" in input_file:
-                    num_peaks = 1
-
-                for peak_shape in range(num_peaks):
-                    adjusted_materials_id = materials_id + "_" + str(peak_shape)
-                    #all list orders except for graph_arrays should have bene preserved 
-                    ordered_results.append({'xrd_intensities': xrd_intensities[i],
-                                            'xrd_locations': xrd_locations[i], 
-                                            'atomic_species': atomic_species[i], 
-                                            'disc_sim_xrd': disc_sim_xrd[i], 
-                                            'pv_xrd': pv_xrd_dict[adjusted_materials_id],
-                                            'multi_hot_encoding': multi_hot_encoding[i],
-                                            'graph_arrays': graph_dict[materials_id]})
-                    
-                    for prop in prop_list:
-                        ordered_results[len(ordered_results) - 1][prop] = prop_dictionary[prop][i]
-            else:
-                #all list orders except for graph_arrays should have bene preserved 
-                ordered_results.append({'xrd_intensities': xrd_intensities[i],
-                                        'xrd_locations': xrd_locations[i], 
-                                        'atomic_species': atomic_species[i], 
-                                        'disc_sim_xrd': disc_sim_xrd[i], 
-                                        'pv_xrd': pv_xrd_dict[materials_id],
-                                        'multi_hot_encoding': multi_hot_encoding[i],
-                                        'graph_arrays': graph_dict[materials_id]})
-                
-                for prop in prop_list:
-                    ordered_results[i][prop] = prop_dictionary[prop][i]
-    
-        end = time.time()
-        print("time taken: {}".format(end-start))
+    end = time.time()
+    print("time taken: {}".format(end-start))
 
     return ordered_results
-
 
 def preprocess_tensors(crystal_array_list, niggli, primitive, graph_method):
     def process_one(batch_idx, crystal_array, niggli, primitive, graph_method):
