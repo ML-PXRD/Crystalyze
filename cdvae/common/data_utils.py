@@ -722,7 +722,6 @@ def multi_hot_encode(atomic_numbers):
 def preprocess(input_file: str, 
                train_fraction: float, 
                prop_list: List[str], 
-               task: Literal['reconstruction', 'generation'], 
                index: Optional[int] = None) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
     """
     Preprocesses the input data for training or generation.
@@ -731,7 +730,6 @@ def preprocess(input_file: str,
         input_file (str): The path to the input file.
         train_fraction (float): The fraction of data to use for training.
         prop_list (List[str]): The list of properties to include in the output.
-        task (Literal['reconstruction', 'generation']): The task to perform, either 'reconstruction' or 'generation'.
         index (Optional[int], optional): The index to use for subsectioning the training data. Defaults to None.
 
     Returns:
@@ -743,11 +741,8 @@ def preprocess(input_file: str,
     print("using existing csv file ", df_file_name)
     df = pd.read_csv(df_file_name)
 
-    if task == 'reconstruction':
-        print("using existing graph file ", graph_file_name)
-        graph_dict = torch.load(graph_file_name)
-    else:
-        graph_dict = None
+    print("using existing graph file ", graph_file_name)
+    graph_dict = torch.load(graph_file_name)
     
     n = round(len(df)*train_fraction)
     #allow for subsectioning of training data - used for data size impact studies 
@@ -801,7 +796,7 @@ def preprocess(input_file: str,
                                     'disc_sim_xrd': disc_sim_xrd[i], 
                                     'pv_xrd': pv_xrd_dict[adjusted_materials_id],
                                     'multi_hot_encoding': multi_hot_encoding[i],
-                                    'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
+                                    'graph_arrays': graph_dict[materials_id]})
             
             for prop in prop_list:
                 ordered_results[i][prop] = prop_dictionary[prop][i]
@@ -822,7 +817,7 @@ def preprocess(input_file: str,
                                         'disc_sim_xrd': disc_sim_xrd[i], 
                                         'pv_xrd': pv_xrd_dict[adjusted_materials_id],
                                         'multi_hot_encoding': multi_hot_encoding[i],
-                                        'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
+                                        'graph_arrays': graph_dict[materials_id]})
                 for prop in prop_list:
                     ordered_results[len(ordered_results) - 1][prop] = prop_dictionary[prop][i]
         else:
@@ -833,7 +828,7 @@ def preprocess(input_file: str,
                                     'disc_sim_xrd': disc_sim_xrd[i], 
                                     'pv_xrd': pv_xrd_dict[materials_id],
                                     'multi_hot_encoding': multi_hot_encoding[i],
-                                    'graph_arrays': graph_dict[materials_id] if task == 'reconstruction' else None})
+                                    'graph_arrays': graph_dict[materials_id]})
             
             for prop in prop_list:
                 ordered_results[i][prop] = prop_dictionary[prop][i]

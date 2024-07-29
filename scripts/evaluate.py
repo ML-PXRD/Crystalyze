@@ -73,10 +73,8 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             batch_lengths, batch_angles = [], []
             batch_predicted_property = []
 
-            #_, _, z = model.prior_encode(batch, xrd_int, xrd_loc, atom_spec)
-
             for eval_idx in range(num_evals):
-                _, _, z = model.encode(batch, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd, multi_hot_encode = multi_hot_encoding)
+                _, _, z = model.encode(None, xrd_int, xrd_loc, atom_spec, disc_sim_xrd, testing = True, pv_xrd = pv_xrd, multi_hot_encode = multi_hot_encoding)
 
                 #predict the property 
                 try: 
@@ -267,10 +265,8 @@ def main(args):
 
         #check to see if model_path / recon_out_name exists
         #if it does, then we need to increment the name
-        if (model_path / recon_out_name).exists():
-            #get the number of files that have the same name
-            num_files = len(list(model_path.glob(f'eval_recon_{args.label}*')))
-            recon_out_name = f'eval_recon_{args.label}_{num_files}.pt'
+        
+        recon_out_name = f'eval_recon_{args.label}_{args.iteration}.pt'
 
         torch.save({
             'eval_setting': args,
@@ -327,20 +323,6 @@ def main(args):
             'time': time.time() - start_time
         }, model_path / gen_out_name)
 
-        shared_model_path = model_path.replace("hydra", "Freedman_CDVAE_shared/hydra")
-        os.makedirs(shared_model_path, exist_ok=True)
-
-        torch.save({
-            'eval_setting': args,
-            'frac_coords': frac_coords,
-            'num_atoms': num_atoms,
-            'atom_types': atom_types,
-            'lengths': lengths,
-            'angles': angles,
-            'all_frac_coords_stack': all_frac_coords_stack,
-            'all_atom_types_stack': all_atom_types_stack,
-            'time': time.time() - start_time
-        }, shared_model_path / gen_out_name)
 
     if 'opt' in args.tasks:
         print('Evaluate model on the property optimization task.')
@@ -381,6 +363,7 @@ if __name__ == '__main__':
     #number of batches to evaluate
     parser.add_argument('--num_batches', default=36, type=int)
     parser.add_argument('--test_set_override', default=None, type=str)
+    parser.add_argument('--iteration': default=0, type=int)
     
     args = parser.parse_args()
 

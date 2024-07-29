@@ -11,7 +11,9 @@ from cdvae.common.utils import PROJECT_ROOT
 from cdvae.common.data_utils import (
     preprocess, preprocess_tensors, add_scaled_lattice_prop)
 
+from typing import Literal, List, Optional, Tuple, Dict 
 import numpy as np
+
 class CrystDataset(Dataset):
     def __init__(self, name: ValueNode, path: ValueNode,
                  prop: ValueNode, niggli: ValueNode, primitive: ValueNode,
@@ -22,6 +24,7 @@ class CrystDataset(Dataset):
                  source: ValueNode = "any",
                  num_augmented_data: ValueNode = 0,
                  **kwargs):
+        
         super().__init__()
         self.path = path
         self.name = name
@@ -38,34 +41,19 @@ class CrystDataset(Dataset):
         self.num_augmented_data = num_augmented_data
 
         if self.num_augmented_data == 0:
-            self.cached_data = preprocess(
-                self.path,
-                preprocess_workers,
-                niggli=self.niggli,
-                primitive=self.primitive,
-                graph_method=self.graph_method,
-                train_fraction=self.train_fraction,
-                prop_list=[prop], 
-                max_num_atoms=self.max_num_atoms,
-                source = self.source)
+            self.cached_data = preprocess(self.path,
+                                                    train_fraction=self.train_fraction,
+                                                    prop_list=[prop])
             add_scaled_lattice_prop(self.cached_data, lattice_scale_method)
 
         else:
             self.cached_data = []
             for i in range(self.num_augmented_data):
                 print('processing augmented data', i)
-                self.cached_data.append(preprocess(
-                                                    self.path,
-                                                    preprocess_workers,
-                                                    niggli=self.niggli,
-                                                    primitive=self.primitive,
-                                                    graph_method=self.graph_method,
+                self.cached_data.append(preprocess(self.path,
                                                     train_fraction=self.train_fraction,
-                                                    prop_list=[prop], 
-                                                    max_num_atoms=self.max_num_atoms,
-                                                    source = self.source,
+                                                    prop_list=[prop],
                                                     index = i))
-                
                 add_scaled_lattice_prop(self.cached_data[i], lattice_scale_method)
         
         self.lattice_scaler = None
@@ -96,13 +84,13 @@ class CrystDataset(Dataset):
         multi_hot_encoding = data_dict['multi_hot_encoding']
         pv_xrd = data_dict['pv_xrd']
 
+        # if there is only 1 pv xrd, unsqueeze it
+        if len(pv_xrd.shape) == 1:
+            pv_xrd = pv_xrd.unsqueeze(0)
+
         #0 out the first 1000 columns of pv_xrd. This makes the actual 2theta range 15-90
         pv_xrd[:, :1000] = 0
-        # pv_xrd[:, -2000:] = 0
 
-        # print(xrd_intensities)
-        # print(xrd_locations)
-        # print(atomic_species)
         # atom_coords are fractional coordinates
         # edge_index is incremented during batching
         # https://pytorch-geometric.readthedocs.io/en/latest/notes/batching.html
@@ -119,11 +107,7 @@ class CrystDataset(Dataset):
             num_nodes=num_atoms,  # special attribute used for batching in pytorch geometric
             y=prop.view(1, -1),
         )
-        # print(data)
-        # print(xrd_intensities)
-        # print(xrd_locations)
-        # print(atomic_species)
-        # print(disc_sim_xrd)
+
         return data, xrd_intensities, xrd_locations, atomic_species, disc_sim_xrd, pv_xrd, multi_hot_encoding
 
     def __repr__(self) -> str:

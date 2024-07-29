@@ -31,8 +31,6 @@ def worker_init_fn(id: int):
     # More than 128 bits (4 32-bit words) would be overkill.
     np.random.seed(ss.generate_state(4))
     random.seed(uint64_seed)
-
-
 class CrystDataModule(pl.LightningDataModule):
     def __init__(
         self,
