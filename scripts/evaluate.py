@@ -282,21 +282,6 @@ def main(args):
             'time': time.time() - start_time
         }, model_path / recon_out_name)
 
-        shared_model_path = model_path.replace("hydra", "Freedman_CDVAE_shared/hydra")
-        os.makedirs(shared_model_path, exist_ok=True)
-
-        torch.save({
-            'eval_setting': args,
-            'frac_coords': frac_coords,
-            'num_atoms': num_atoms,
-            'atom_types': atom_types,
-            'lengths': lengths,
-            'angles': angles,
-            'all_frac_coords_stack': all_frac_coords_stack,
-            'all_atom_types_stack': all_atom_types_stack,
-            'time': time.time() - start_time
-        }, shared_model_path / gen_out_name)
-
     if 'gen' in args.tasks:
         print('Evaluate model on the generation task.')
         start_time = time.time()
@@ -363,7 +348,7 @@ if __name__ == '__main__':
     #number of batches to evaluate
     parser.add_argument('--num_batches', default=36, type=int)
     parser.add_argument('--test_set_override', default=None, type=str)
-    parser.add_argument('--iteration': default=0, type=int)
+    parser.add_argument('--iteration', default=0, type=int)
     
     args = parser.parse_args()
 
