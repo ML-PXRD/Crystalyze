@@ -61,9 +61,6 @@ def reconstructon(loader, model, ld_kwargs, num_evals,
             pv_xrd = pv_xrd.cuda()
             multi_hot_encoding = multi_hot_encoding.cuda()
 
-            print(idx)
-            print(batch)
-
             if torch.cuda.is_available():
                 batch.cuda()
             print(f'batch {idx} in {len(loader)}')
