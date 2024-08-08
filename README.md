@@ -10,7 +10,7 @@ Crystalyze is a machine learning model that combines XRD representation learning
 
 To use Crystalyze, follow these steps:
 
-1. conda env create -f env_sub.yml
+1. conda env create -f env.yml
 2. conda activate crystalyze
 3. pip install -e .
 
