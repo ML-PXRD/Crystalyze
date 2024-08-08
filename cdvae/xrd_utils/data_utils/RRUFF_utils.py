@@ -401,13 +401,6 @@ class selection():
 
             structure_lattice.append(strings.str_to_lattice(df_3['cif'].iloc[i], dataset = 'MP'))
     
-            # if RRUFF_amcsd_data.df['lps'] is not None: 
-            #     length_mse = mse(np.array(RRUFF_amcsd_data.df['lps'].iloc[0].lengths) / np.max(np.array(RRUFF_amcsd_data.df['lps'].iloc[0].lengths)), np.array(my_lattice.lengths) / np.max(np.array(my_lattice.lengths)))
-            #     angle_mse = mse(np.array(RRUFF_amcsd_data.df['lps'].iloc[0].angles) / np.max(np.array(RRUFF_amcsd_data.df['lps'].iloc[0].angles)), np.array(my_lattice.angles) / np.max(np.array(my_lattice.angles)))
-            #     mse_val = length_mse + angle_mse
-            #     lattice_mses.append(mse_val)
-            # else:
-            #     lattice_mses.append(100)
 
         cosine_sim_pick = indices[np.argmax(cosine_similarity_values)]
         negative_mse_pick = indices[np.argmax(mse_values)]
@@ -629,76 +622,3 @@ def inspect_matches(new_instance, fulldf, unique_material_id):
 
                 #plot
                 plot_xrds.plot(pattern, x, y)
-
-
-
-# THIS RENAMING BLOCK ONLY NEEDS TO BE RUN ONCE
-# filenames = os.listdir("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD")
-# for file in filenames:
-#     with open("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + file, 'r') as f:
-#         try: 
-#             text = f.read()
-#             if "data_global" in text:
-#                 #find what comes after _chemical_name_mineral
-#                 mineral_name = text.split('_chemical_name_mineral')[1].split('\n')[0]
-
-#                 #make a new filename that is just the mineral name .cif 
-#                 new_filename = mineral_name + '.cif'
-#                 how_many_exist = 0  
-                
-#                 #check if the file already exists
-#                 if os.path.exists("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + new_filename):
-#                     how_many_exist += 1
-#                     new_filename = mineral_name + '_' + str(how_many_exist) + '.cif'
-#                     os.rename("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + file, "/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + new_filename)
-#                 else:
-#                     os.rename("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + file, "/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + new_filename)
-
-#             else:
-#                 #remove the file if it doesn't have data_global
-#                 os.remove("/home/gridsan/tmackey/cdvae/scripts/1-13-2024_RUFF_data/Combined/AMCSD/" + file) 
-#         except:
-#             print(file)      
-        
-    # def reformat_csv(self):
-#     """
-#     Reformat the dataframe to have the cif strings as strings instead of pymatgen structure objects.
-#     """
-
-#     def structure_to_cif_string(structure):
-#         # Creating a CifWriter object
-#         cif_writer = CifWriter(structure)
-
-#         # Writing the structure to a string in CIF format
-#         return cif_writer.__str__()
-
-#     #apply the function to all of the keys in the dictionary
-#     list_of_cifs = []
-#     list_of_ids_2 = []
-#     list_of_xrds_2 = []
-#     list_of_specs_2 = []
-#     list_of_lps_2 = []
-#     list_of_structures = list(self.df['cif'])
-#     list_of_names = list(self.df['material_id'])
-#     list_of_specs = list(self.df['spec'])
-#     list_of_lps = list(self.df['lps'])
-    
-#     for index, structure in enumerate(list_of_structures):
-#         list_of_cifs.append(structure_to_cif_string(list_of_structures[index]))
-#         list_of_ids_2.append(list_of_names[index])
-#         list_of_xrds_2.append(self.list_of_xrds[index])
-#         list_of_specs_2.append(list_of_specs[index])
-#         list_of_lps_2.append(list_of_lps[index])
-
-#     #make a new pandas dataframe with the cif string and the material id
-#     self.df = pd.DataFrame({'cif': list_of_cifs, 'material_id': list_of_ids_2, 'spec': list_of_specs_2, 'lps': list_of_lps_2})
-
-#     #for every material id remaining, find the corresponding code from the dictionary and use that as a key in a new dictionary
-#     self.pv_dict= {}
-#     for i in range(len(list_of_xrds_2)):
-#         self.pv_dict[self.df['material_id'].iloc[i]] = list_of_xrds_2[i]
-
-#     self.pv_dict = RRUFF_data.tensorize_xrds(self.pv_dict)
-
-#     checkpointing.save_checkpoint(self.dirname, "reformatted_df", self.df, "csv")
-#     checkpointing.save_checkpoint(self.dirname, "pv_dict", self.pv_dict, "pt")

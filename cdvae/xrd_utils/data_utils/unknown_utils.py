@@ -40,6 +40,26 @@ CrystalNN = local_env.CrystalNN(
 elemental_symbols = ['H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm', 'Md', 'No', 'Lr', 'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og']
 OLD_DIRECTORY = False
 
+
+BaFeBi_filenames_original = ["postheat_minigrid_wide_011_2_BaFeBi_peaks_MgO_BaBi3.xy", 
+                    "postheat_minigrid_wide_011_2_BaFeBi_peaks_MgO.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBiO_peaks_MgO_BaBi3.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO_BaBi3.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBi_raw_BaBi3.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBi_peaks_BaBi3.xy",
+                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO_BaBi3_new.xy"]
+
+KBiO_filenames_original = ["K_Bi_O_BiV_3_7887_MgO41495_peaks_MgO_Bi_V.xy",
+                           "K_Bi_O_BiV_3_7887_MgO41495_peaks_MgO.xy",
+                           "K_Bi_O_BiV_3_7887_MgO41495_peaks_Bi_V.xy",
+                           "K_Bi_O_postheat_054_peaks_MgO.xy"]
+
+KBi_filenames_original = ["K_Bi_BiV_3_7887_MgO41495_peaks_MgO_Bi_V.xy",
+                          "K_Bi_O_BiV_3_7887_MgO41495_raw_Bi_V.xy",
+                          "K_Bi_O_BiV_3_7887_MgO41495_raw_MgO.xy",
+                          "K_Bi_O_BiV_3_7887_MgO41495_raw_MgO_Bi_V.xy"]
+
 def generate_structure(elements, stoichiometry):
     """ Generate a random structure with the given elements and stoichiometry.
 
@@ -477,57 +497,6 @@ def stoichioemtry_extraction(dir):
 
         return dictionary_of_cifs
 
-# def stoichioemtry_extraction(dir):
-#     """
-#     This function takes a directory of .xy files and extracts the stoichiometry of the compound from the filename.
-
-#     Args:
-
-#     dir (str): the directory of .xy files
-
-#     Returns: 
-
-#     dictionary of cifs (dict): a dictionary of cifs with the filename as the key and the cif string as the value
-
-#     """
-
-#     dictionary_of_cifs = {}
-
-#     filenames = os.listdir(dir)
-
-#     for filename in filenames:
-#         if ".xy" in filename:
-#             if "diffraction_for_Tsach" in dir:
-#                 for key, value in hard_coded_name_key_matches.items():
-#                     if key in filename:
-#                         extracted_elements = value
-#                         break
-#             elif "Freedman" in dir: 
-#                 list_of_string_elements = filename[0:filename.find("heat")].split("_")
-#                 extracted_elements = [s for s in list_of_string_elements if s in elemental_symbols]
-#             else:
-#                 extracted_elements = [element for element in split_elements(filename)]
-#                 #sum all the integer elements 
-#                 sum = np.sum([element for element in extracted_elements if type(element) == int])
-#                 if sum > 20:
-#                     continue
-#                 else: 
-#                     #get the string only elements 
-#                     string_only = [element for element in extracted_elements if type(element) == str]
-#                     #check to see if they are all in the elemental symbols list
-#                     if not all(elem in elemental_symbols for elem in string_only):
-#                         continue
-#                     extracted_elements = [str(element) for element in extracted_elements]
-                        
-#             print(filename, extracted_elements)
-
-#             cif_string = generate_cif_string_from_stoichiometry(extracted_elements)
-#             dictionary_of_cifs[filename] = cif_string
-
-#     return dictionary_of_cifs
-
-#dictionary_of_cifs = stoichioemtry_extraction("/home/gridsan/tmackey/cdvae/scripts/1-22-2024_clean_impelementations/PDF_large_scale/filtered_raw")
-#%%
 def build_crystal(crystal_str, niggli=True, primitive=False):
     try: 
         """Build crystal from cif string."""
@@ -758,30 +727,3 @@ if __name__ == "__main__":
     job_type = sys.argv[5]
     
     main(dir, final_directory, job_type)
-
-#Example usage:
-# dir = "/home/gridsan/tmackey/cdvae/scripts/XRD_CDVAE/PDF_large_scale/filtered_raw"
-# final_directory = "/home/gridsan/tmackey/cdvae/data/PDF_filtered_raw2"
-#python data_utils.py /home/gridsan/tmackey/cdvae/scripts/1-22-2024_clean_impelementations/PDF_large_scale/filtered_raw /home/gridsan/tmackey/cdvae/data/PDF_filtered_raw
-# %%
-
-###Hopefully this stuff is depcrecated
-
-BaFeBi_filenames_original = ["postheat_minigrid_wide_011_2_BaFeBi_peaks_MgO_BaBi3.xy", 
-                    "postheat_minigrid_wide_011_2_BaFeBi_peaks_MgO.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBiO_peaks_MgO_BaBi3.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO_BaBi3.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBi_raw_BaBi3.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBi_peaks_BaBi3.xy",
-                    "postheat_minigrid_wide_011_2_BaFeBi_raw_MgO_BaBi3_new.xy"]
-
-KBiO_filenames_original = ["K_Bi_O_BiV_3_7887_MgO41495_peaks_MgO_Bi_V.xy",
-                           "K_Bi_O_BiV_3_7887_MgO41495_peaks_MgO.xy",
-                           "K_Bi_O_BiV_3_7887_MgO41495_peaks_Bi_V.xy",
-                           "K_Bi_O_postheat_054_peaks_MgO.xy"]
-
-KBi_filenames_original = ["K_Bi_BiV_3_7887_MgO41495_peaks_MgO_Bi_V.xy",
-                          "K_Bi_O_BiV_3_7887_MgO41495_raw_Bi_V.xy",
-                          "K_Bi_O_BiV_3_7887_MgO41495_raw_MgO.xy",
-                          "K_Bi_O_BiV_3_7887_MgO41495_raw_MgO_Bi_V.xy"]
