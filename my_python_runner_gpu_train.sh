@@ -17,17 +17,3 @@ conda activate cdvae
 
 # Pass the max_num_atoms parameter to the Hydra configuration
 python cdvae/run.py data=$1 expname=$2 max_num_atoms=$3
-
-# readarray -t nodes <<< $(scontrol show hostnames $SLURM_NODELIST)
-# hoststring=""
-# for node in "${nodes[@]}"; do
-#     hoststring+="${node}:1,"
-# done
-# hoststring=${hoststring%,}  # Remove the trailing comma
-
-# echo "Running on hosts: $hoststring"
-
-# module load mpi/openmpi-4.1.5
-# module load nccl/2.18.1-cuda11.8
-# # Run with Horovod
-# horovodrun -np $SLURM_NNODES -H $hoststring python cdvae/run.py data=$1 expname=$2 max_num_atoms=$3
