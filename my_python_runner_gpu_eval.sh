@@ -40,18 +40,15 @@ while [ $counter -lt $4 ]; do
   #check to see if $5 is empty
   if [ -z "$5" ]; then
     echo "\$5 is empty"
+    #EX: python scripts/evaluate.py --model_path /home/gridsan/tmackey/hydra/singlerun/2024-01-31/ae_pf/ --tasks recon --num_batches 1 --force_num_atoms --force_atom_types --test_set_override "unsolved_compounds" --label "wstoich_unsolved_compounds"
     python scripts/evaluate.py --model_path $1 --tasks recon --num_batches $2 $FORCE_NUM_ATOMS_FLAG $FORCE_ATOM_TYPES_FLAG --label $6
-    #python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True
   else
     echo "\$5 is NOT empty"
     python scripts/evaluate.py --model_path $1 --tasks recon --num_batches $2 $FORCE_NUM_ATOMS_FLAG $FORCE_ATOM_TYPES_FLAG --test_set_override $5 --label $6
-    #python scripts/compute_metrics.py --root_path $1 --tasks recon --compare_diffraction_patterns True --label $5
   fi
-
   # Increment the counter
   ((counter++))
 done
 
-#python scripts/evaluate.py --model_path /home/gridsan/tmackey/hydra/singlerun/2024-01-31/ae_pf/ --tasks recon --num_batches 1 --force_num_atoms --force_atom_types --test_set_override "unsolved_compounds" --label "wstoich_unsolved_compounds"
 #python scripts/evaluate.py --model_path /home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf --tasks recon --num_batches 1 --force_num_atoms --force_atom_types --test_set_override "PDF_unsolved_compounds" --label "wstoich_PDF_unsolved_compounds"
 #python scripts/evaluate.py --model_path /home/gridsan/tmackey/hydra/singlerun/2024-01-29/augmented_vae_nopf --tasks recon --num_batches 1 --force_num_atoms --force_atom_types --test_set_override "Freedman_lab_full_subtraction" --label "Freedman_lab_full_subtraction"
