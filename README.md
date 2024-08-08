@@ -1,6 +1,6 @@
 # Crystalyze Repository
 
-This repository contains the code and resources for the Crystalyze project.
+This repository contains the code and resources for the Crystalyze project. This code is built on top of the excellent [Crystal Diffusion Variational Autoencoder](https://github.com/txie-93/cdvae) repository.
 
 ## Overview
 
