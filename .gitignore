@@ -223,9 +223,6 @@ error/
 #output folder
 output/
 
-#data folder
-data/
-
 #checkpointed XRD encoders
 cdvae/pl_modules/model_final_8192.pth
 cdvae/pl_modules/model_final_8500.pth
