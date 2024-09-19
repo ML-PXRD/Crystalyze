@@ -1,4 +1,4 @@
-NOTE: THIS REPOSITORY IS NOT YET READY FOR PUBLIC USE. We will update this README as soon as it is and are currently working on it!
+NOTE: We are still in the process of migrating the raw data for Crystalyze to this repository and fixing dependency issues. We will update this README as soon as the data is migrated in the near future!
 
 # Crystalyze Repository
 
