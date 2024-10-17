@@ -200,7 +200,7 @@ class CDVAE(BaseModule):
             self.pretrained_weights_path = "/home/gridsan/tmackey/cdvae/cdvae/pl_modules/model_final_8500.pth" # the path to the pretrained weights for the 8500 xrd patterns
         else:
             self.pretrained_weights_path = "" # the path to the pretrained weights for the 256 xrd patterns
-        self.use_weight_initialization = getattr(self.hparams, 'use_weight_initialization', False) # if true, then the model is trained with pretrained weights
+        self.use_weight_initialization = False # if true, then the model is trained with pretrained weights
         if self.use_weight_initialization:
             if os.path.exists(self.pretrained_weights_path):
                 pretrained_weights = torch.load(self.pretrained_weights_path)
