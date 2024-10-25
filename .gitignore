@@ -242,3 +242,6 @@ env_cdvae.yml
 ./my_python_runner_gpu_train.sh
 
 scripts/Dev/
+
+data/mp_20_final/
+data/mp_20_final_augmented/
