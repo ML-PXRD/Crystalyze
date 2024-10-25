@@ -12,11 +12,11 @@ Crystalyze is a machine learning model that combines XRD representation learning
 
 To use Crystalyze, follow these steps:
 
-1. Install the cdvae conda environment by running `conda env create -f env.yml`. 
+1. Install the cdvae_release conda environment by running `conda env create -f env.yml`. 
     * Note: cpu support should work across all major systems and gpu support has been confirmed on NVIDIA CUDA 12.2. NVIDIA CUDA 12.4 does not seem to work with the current environment's pytorch version.
     We are working on updating the environment to work with CUDA 12.4, also feel free to post or reach out if you find a solution. 
 
-2. conda activate cdvae
+2. conda activate cdvae_release
 
 3. pip install -e .
 
