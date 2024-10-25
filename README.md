@@ -63,8 +63,8 @@ where:
 - `$1` is the path to the model
 - `$2` is the number of batches
 - `$3` is the label for the run
-- `$FORCE_NUM_ATOMS_FLAG` is a flag to force the number of atoms in the generated crystal structures to be the same as the number of atoms in the dummy graph data input
-- `$FORCE_ATOM_TYPES_FLAG` is a flag to force the atom types in the generated crystal structures to be the same as the atom types in the dummy graph data input
+- `$FORCE_NUM_ATOMS_FLAG` is a flag to force the number of atoms in the generated crystal structures to be the same as the number of atoms in the dummy graph data input. Note that this is OFF for the evaluations done in the paper. 
+- `$FORCE_ATOM_TYPES_FLAG` is a flag to force the atom types in the generated crystal structures to be the same as the atom types in the dummy graph data input. Note that this is OFF for the evaluations done in the paper. 
 
 ## Future Releases 
 * Code for computing metrics given generated crystals
