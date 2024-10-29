@@ -3,9 +3,9 @@ _target_: cdvae.pl_modules.model.CDVAE
 # Crytalyze parameters 
 useoriginal: false
 use_composition_constraint: true
-variational_latent_space: false
+variational_latent_space: true
 in_dim: 8500
-use_weight_initialization: true
+use_weight_initialization: false
 noise_sd: ${data.noise_sd}
 
 # CDVAE parameters 

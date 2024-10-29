@@ -57,7 +57,7 @@ def load_model(model_path, load_data=False, testing=True, test_set_override=None
 
         if test_set_override is not None:
             # Load the data configuration from the file of interest
-            data_cfg_path = f"/home/gridsan/tmackey/cdvae/conf/data/{test_set_override}.yaml"
+            data_cfg_path = f"/home/gridsan/groups/Freedman_CDVAE/Crystalyze/conf/{test_set_override}.yaml"
             data_cfg = OmegaConf.load(data_cfg_path)
 
             # Replace the data portion of the base configuration with the new data configuration
