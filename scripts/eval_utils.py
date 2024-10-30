@@ -21,6 +21,8 @@ from torch_geometric.data import DataLoader
 
 from omegaconf import OmegaConf
 
+from cdvae.common.utils import PROJECT_ROOT
+
 CompScaler = StandardScaler(
     means=np.array(CompScalerMeans),
     stds=np.array(CompScalerStds),
@@ -56,8 +58,8 @@ def load_model(model_path, load_data=False, testing=True, test_set_override=None
         base_cfg = compose(config_name='hparams')
 
         if test_set_override is not None:
-            # Load the data configuration from the file of interest
-            data_cfg_path = f"/home/gridsan/tmackey/cdvae/conf/data/{test_set_override}.yaml"
+            # Load the data configuration from the file of interest using PROJECT_ROOT
+            data_cfg_path = PROJECT_ROOT / "conf" / f"{test_set_override}.yaml"
             data_cfg = OmegaConf.load(data_cfg_path)
 
             # Replace the data portion of the base configuration with the new data configuration
