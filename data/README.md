@@ -3,8 +3,7 @@
 After downloading the data from the shared drive, you will want to move it into this directory.
 The data is from the [MP-20](mp_20) (Jain et al., 2013) dataset, specifically from the mp_20 data used in the [CDVAE](cdvae) (Xie et al., 2021) paper.
 
-The crystal graph data structures are computed with code from the cdvae module. The preprocessing notebook/code will be released soon. The process 
-is identical to the one used in the CDVAE paper but with the graph conversion done once ahead of time to cut down on overhead per run. The crystal graph data is identical between the augmented and non-augmnented datasets.
+The crystal graph data structures are computed with code from the cdvae moduleThe process is identical to the one used in the CDVAE paper but with the graph conversion done once ahead of time to cut down on overhead per run. The crystal graph data is identical between the augmented and non-augmnented datasets.
 
 The xrd data is calculated with pymatgen. The preprocessing notebook/code will be released soon. The process for the creation of both the augmented and non-augmented datasets is as described in the paper. 
 
